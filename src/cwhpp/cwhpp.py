@@ -58,39 +58,6 @@ class PatchedLGBMRegressor(lightgbm.LGBMRegressor):
 # TEMPORAIRE TEMPORAIRE TEMPORAIRE TEMPORAIRE TEMPORAIRE 
 ############################################################
 
-# A custom train-test split
-def train_test_split_by_id(df, id_column, test_size=0.2, random_state=None):
-    """
-    Perform train-test split ensuring that a share of unique observations (based on `id_column`)
-    are entirely excluded from the train set.
-    
-    Parameters:
-    - df (pl.DataFrame): Input Polars DataFrame
-    - id_column (str): Column name used to identify duplicates
-    - test_size (float): Proportion of the dataset to include in the test split (default 0.2)
-    - random_state (int): Random seed for reproducibility (default None)
-    
-    Returns:
-    - train (pl.DataFrame): Training set
-    - test (pl.DataFrame): Test set
-    """
-    # Set the random seed for reproducibility if provided
-    if random_state is not None:
-        np.random.seed(random_state)
-
-    # Get unique identifier values
-    unique_ids = df.select(id_column).unique()
-
-    # Select test_size% of the unique idlocal values to exclude from the training set
-    excluded_ids = unique_ids.sample(fraction=test_size, seed=random_state).to_series().to_list()
-
-    # Filter the original DataFrame into two sets
-    test_set = df.filter(pl.col(id_column).is_in(excluded_ids))
-    train_set = df.filter(~pl.col(id_column).is_in(excluded_ids))
-    
-    return train_set, test_set
-
-
 def rotate_point(x, y, angle, center=None):
     """
     Rotate a 2D point counterclockwise by a given angle (in degrees) around a given center.
