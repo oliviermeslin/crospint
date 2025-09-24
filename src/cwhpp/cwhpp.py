@@ -673,3 +673,119 @@ class TwoStepsModel(BaseEstimator):
             print("    The model has no log-transformation.") if verbose else None
 
         return y_pred
+
+
+def predict_market_value(
+    data: pl.DataFrame = None,
+    model = None,
+    date_market_value = None, 
+    add_RMSE_correction = False, 
+    **kwargs
+):
+    # Extract the name of the feature containing the transaction name
+    transaction_date_name = model.price_model_pipeline["date_conversion"].transaction_date_name
+    if model is None:
+        raise ValueError("The model is missing.")
+
+    if date_market_value is not None:
+        print(f'    Predicting market values using date {date_market_value}.')
+        data = (
+            data
+            .with_columns(
+                pl.lit(date_market_value).str.to_date(format = '%Y-%m-%d').alias(transaction_date_name),
+                pl.lit(date_market_value[0:4]).str.to_integer().alias("anneemut"),
+                pl.lit(date_market_value[5:7]).str.to_integer().alias("moismut")
+            )
+        )
+    elif transaction_date_name in data.columns:
+        print(f'    Predicting market values using transaction date from the data.')
+    else:
+        raise ValueError("The date for market value prediction is missing.")
+    
+    # Predict market value
+    market_value = model.predict(data, **kwargs)
+
+    return market_value
+
+
+def build_analysis_table(
+    data: pl.DataFrame = None,
+    model = None,
+    date_market_value = None, 
+    add_RMSE_correction = False,
+    **kwargs
+):
+
+    prediction = predict_market_value(
+        data = data,
+        model = model,
+        date_market_value = date_market_value, 
+        add_RMSE_correction=add_RMSE_correction,
+        **kwargs
+    )
+    
+    if add_RMSE_correction :
+        valeur_correction_term = model.correction_term
+    else:
+        valeur_correction_term = 1
+
+    if isinstance(data, pl.DataFrame):
+        data = (
+            data
+            .with_columns(
+                predicted_price=pl.Series(prediction),
+                correction_RMSE=pl.lit(valeur_correction_term)
+            )
+            .with_columns(
+                residual=np.log(c.valeurfonc)-np.log(c.predicted_price / valeur_correction_term)
+            )
+        )
+
+    if isinstance(data, pd.DataFrame):
+        prediction = pd.Series(prediction)
+        data["predicted_price"] = None
+        data["predicted_price"] = data["predicted_price"].astype("float")
+        data.loc[:, "predicted_price"] = prediction
+        data["correction_RMSE"] = None
+        data["correction_RMSE"] = data["correction_RMSE"].astype("float")
+        data.loc[:, "correction_RMSE"] = pd.Series([valeur_correction_term for i in range(data.shape[0])])
+
+        data["residual"] = None
+        data["residual"] = data["residual"].astype("float")
+        data.loc[:, "residual"] = np.log(data["valeurfonc"]) - np.log(data["predicted_price"] / valeur_correction_term)
+
+    return(data)
+
+
+
+def optimize_model(model):
+    # Optimize the model with OneDAL
+    booster = copy.deepcopy(model.price_model_pipeline[-1].booster_)
+    model_optimized = d4p.mb.convert_model(booster) 
+    # Create an optimized pipeline
+    if "coord_rotation" in [step[0] for step in model.price_model_pipeline.steps]:
+        print("There is a rotation step")
+        price_model_pipeline_optimized = Pipeline(
+            steps = [
+                ("validate_features", model.price_model_pipeline[0]),
+                ("coord_rotation", model.price_model_pipeline[1]),
+                ("date_conversion", model.price_model_pipeline[2]),
+                ("price_model", model_optimized)
+            ]
+        )
+    else:
+        print("There is no rotation step")
+        price_model_pipeline_optimized = Pipeline(
+            steps = [
+                ("validate_features", model.price_model_pipeline[0]),
+                ("date_conversion", model.price_model_pipeline[2]),
+                ("price_model", model_optimized)
+            ]
+        )
+
+    # Replace the original pipeline
+    model_final = copy.deepcopy(model)
+    model_final.price_model_pipeline = price_model_pipeline_optimized
+    model_final.price_model_pipeline[-1].fit = True
+
+    return model_final
