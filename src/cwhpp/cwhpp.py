@@ -21,15 +21,18 @@
 # SOFTWARE.
 
 
+import time
+import copy
 import math
 import numpy as np
 import pandas as pd
 import polars as pl
+from polars import col as c
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn import metrics
 import lightgbm
-import time
+import daal4py as d4p
 
 ############################################################
 # TEMPORAIRE TEMPORAIRE TEMPORAIRE TEMPORAIRE TEMPORAIRE 
