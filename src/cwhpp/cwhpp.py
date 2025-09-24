@@ -751,6 +751,8 @@ def predict_market_value(
 
     if date_market_value is not None:
         print(f'    Predicting market values at date {date_market_value}.')
+        data = (
+            data
             .with_columns(
                 pl.lit(date_market_value).str.to_date(format = '%Y-%m-%d').alias(transaction_date_name),
                 pl.lit(date_market_value[0:4]).str.to_integer().alias("anneemut"),
