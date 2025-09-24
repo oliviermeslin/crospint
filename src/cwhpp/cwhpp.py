@@ -32,8 +32,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn import metrics
 import lightgbm
-import daal4py as d4p
-import cpuinfo
 
 ############################################################
 # TEMPORAIRE TEMPORAIRE TEMPORAIRE TEMPORAIRE TEMPORAIRE 
@@ -833,78 +831,6 @@ class TwoStepsModel(BaseEstimator):
             print("    The model has no log-transformation.") if verbose else None
 
         return y_pred
-
-
-def optimize_model(
-    model,
-    verbose: bool = True
-):
-    """
-    This function optimizes the model for fast inference.
-
-    So far, this function works only for Intel CPUs, using the Insel OneDAL library.
-
-    This optimization does not work if trees are very deep (more than 20 for instance) or
-    if the model uses the native support for categorical variables.
-    """
-
-    # Detect if available CPUs are Intel CPUs 
-    vendor = cpuinfo.get_cpu_info().get('vendor_id_raw', '')
-    is_intel = 'intel' in vendor.lower()
-
-    if is_intel:
-        print(f"    Available CPUs are Intel CPUs, trying model optimization...") if verbose else None
-        
-        try:
-
-            start_time = time.monotonic()
-
-            # Extract the booster
-            booster = copy.deepcopy(model.price_model_pipeline[-1].booster_)
-
-            # Optimize the model with the OneDAL library
-            model_optimized = d4p.mb.convert_model(booster) 
-
-            # Create an optimized pipeline
-            if "coord_rotation" in [step[0] for step in model.price_model_pipeline.steps]:
-                print("There is a rotation step") if verbose else None
-                price_model_pipeline_optimized = Pipeline(
-                    steps = [
-                        ("validate_features", model.price_model_pipeline[0]),
-                        ("coord_rotation", model.price_model_pipeline[1]),
-                        ("date_conversion", model.price_model_pipeline[2]),
-                        ("price_model", model_optimized)
-                    ]
-                )
-            else:
-                print("There is no rotation step") if verbose else None
-                price_model_pipeline_optimized = Pipeline(
-                    steps = [
-                        ("validate_features", model.price_model_pipeline[0]),
-                        ("date_conversion", model.price_model_pipeline[1]),
-                        ("price_model", model_optimized)
-                    ]
-                )
-
-            # Replace the original pipeline
-            model_final = copy.deepcopy(model)
-            model_final.price_model_pipeline = price_model_pipeline_optimized
-            model_final.price_model_pipeline[-1].fit = True
-
-            end_time = time.monotonic()
-
-            print(f"    Model optimization took {end_time - start_time} seconds") if verbose else None
-
-
-        except:
-            print(f"    The model could not be optimized.") if verbose else None
-
-    else:
-        print(f"    Available CPUs are not Intel CPUs, no optimization is possible.") if verbose else None
-        model_final = model    
-
-    return model_final
-
 
 def predict_market_value(
     X: pl.DataFrame,
