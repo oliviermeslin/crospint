@@ -630,7 +630,18 @@ class TwoStepsModel(BaseEstimator):
 
         return y
 
-    def predict(self, X, iteration_range=None, add_RMSE_correction=True, verbose=True, **kwargs):
+    def predict(
+        self,
+        X, 
+        iteration_range=None,
+        add_retransformation_correction: bool = True,
+        retransformation_method: str = "Duan",
+        verbose: bool = True,
+        **kwargs
+    ):
+
+        if add_retransformation_correction is True and retransformation_method not in ["Duan", "Miller"]:
+            raise ValueError("The retransformation_method argument must be either features 'Duan' or 'Miller'.")
 
         # Predict the local average
         print("    Predicting the target") if verbose else None
@@ -640,12 +651,21 @@ class TwoStepsModel(BaseEstimator):
         print("    Invert the target transformation") if verbose and (self.price_sq_meter or self.log_transform) else None
         y_pred = self.inverse_transform(X, y_pred)
 
-        # Add the Duan's 1983 smearing factor correction
-        if add_RMSE_correction:
-            print("    The models includes a correction of the retransformation bias.") if verbose else None
-            global_correction = self.correction_term
-            print("    Average correction = ", round(100 * (global_correction - 1), 2), '%')
-            y_pred = y_pred * global_correction
+        if self.log_transform:
+            if add_retransformation_correction:
+                print("    The models includes a correction of the retransformation bias.") if verbose else None
+                if retransformation_method == "Duan":
+                    print("    The retransformation bias is corrected using Duan's 1983 smearing factor.") if verbose else None
+                    # Use the Duan's 1983 smearing factor correction
+                    global_correction = self.smearing_factor
+                if retransformation_method == "Miller":
+                    print("    The retransformation bias is corrected using Miller's 1984 correction factor.") if verbose else None
+                    # Use the Miller's 1984 retransformation correction
+                    global_correction = np.exp((self.RMSE ** 2) / 2)
+                print("    Average correction = ", round(100 * (global_correction - 1), 2), '%')
+                y_pred = y_pred * global_correction
+            else:
+                print("    There is no correction for the retransformation bias.") if verbose else None
         else:
             print("    The models includes no correction of the retransformation bias.") if verbose else None
 
