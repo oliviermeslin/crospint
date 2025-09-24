@@ -584,20 +584,21 @@ class TwoStepsModel(BaseEstimator):
 
         print(f"    Training time of the price prediction model: {end_time - start_time} seconds") if verbose else None
 
-        # Compute the model's RMSE and correction term (useful for the retransformation correction)
-        print("    Compute the model's RMSE") if verbose else None
-        if X_val is not None and y_val is not None:
-            y_pred = self.price_model_pipeline.predict(X_val)
-            self.RMSE = math.sqrt(metrics.mean_squared_error(y_val_transformed, y_pred))
-            self.correction_term = np.mean(np.exp(y_val_transformed - y_pred))
-            self.source_RMSE = "Val"
-            self.source_correction_term = "Val"
-        else:
-            y_pred = self.price_model_pipeline.predict(X)
-            self.RMSE = math.sqrt(metrics.mean_squared_error(y_transformed, y_pred))
-            self.correction_term = np.mean(np.exp(y_transformed - y_pred))
-            self.source_RMSE = "Train"
-            self.source_correction_term = "Train"
+        if self.log_transform:
+            # Compute the model's RMSE and correction term (useful for the retransformation correction)
+            print("    Compute the model's correction terms") if verbose else None
+            if X_val is not None and y_val is not None:
+                y_pred = self.price_model_pipeline.predict(X_val)
+                self.RMSE = math.sqrt(metrics.mean_squared_error(y_val_transformed, y_pred))
+                self.smearing_factor = np.mean(np.exp(y_val_transformed - y_pred))
+                self.source_RMSE = "Val"
+                self.source_correction_terms = "Val"
+            else:
+                y_pred = self.price_model_pipeline.predict(X)
+                self.RMSE = math.sqrt(metrics.mean_squared_error(y_transformed, y_pred))
+                self.smearing_factor = np.mean(np.exp(y_transformed - y_pred))
+                self.source_RMSE = "Train"
+                self.source_correction_terms = "Train"
 
         print("    RMSE = ", self.RMSE)
         print("    correction_term = ", self.correction_term)
