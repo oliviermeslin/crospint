@@ -296,6 +296,7 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         """
         return self.names_features_output
 
+# A custom transformer to convert a date variable to a numerical variable
 class ConvertDateToInteger(BaseEstimator, TransformerMixin):
     """
     A custom transformer to convert transaction dates to integers (days since a reference date).
