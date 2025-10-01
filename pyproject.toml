@@ -9,9 +9,8 @@ authors = [
 ]
 dependencies = [
     "lightgbm>=4.6.0",
-    "pandas>=2.3.2",
     "polars>=1.33.1",
-    "scikit-learn<1.8",
+    "scikit-learn==1.7.2",
 ]
 
 

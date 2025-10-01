@@ -23,7 +23,6 @@
 
 import math
 import numpy as np
-import pandas as pd
 import polars as pl
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
@@ -66,42 +65,35 @@ class ValidateFeatures(BaseEstimator, TransformerMixin):
         self.feature_names = None
         self.is_fitted = False
 
-    def fit(self, X, y=None):
+    def fit(self, X: pl.DataFrame, y=None):
         """
         Fit the transformer by checking for valid coordinate names and calculating the mean center.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
         self
         """
 
-        if isinstance(X, pl.DataFrame):
-            self.feature_names = X.columns
-        elif isinstance(X, pd.DataFrame):
-            self.feature_names = X.columns.tolist()
-
+        self.feature_names = X.columns
         self.is_fitted = True
         return self
 
-    def transform(self, X, y=None):
+    def transform(self, X: pl.DataFrame, y=None):
         """
         Validate the features
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in transformation.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: dataframe with the right features in the right order.
+        pl.DataFrame: dataframe with the right features in the right order.
         """
-        
-        if isinstance(X, pl.DataFrame):
-            features_X = X.columns
-        elif isinstance(X, pd.DataFrame):
-            features_X = X.columns.tolist()
+
+        features_X = X.columns
 
         missing_features = []
         for var in self.feature_names:
@@ -112,19 +104,18 @@ class ValidateFeatures(BaseEstimator, TransformerMixin):
         if len(missing_features) > 0:
             raise ValueError("Some features are missing in the data.")
 
-
         return X[self.feature_names]
 
-    def fit_transform(self, X, y=None):
+    def fit_transform(self, X: pl.DataFrame, y=None):
         """
         Fit and transform the data in one step.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: Transformed data.
+        pl.DataFrame: Transformed data.
         """
         self.fit(X, y)
         return self.transform(X, y)
@@ -169,12 +160,12 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         self.number_axis = number_axis
         return self
 
-    def fit(self, X, y=None):
+    def fit(self, X: pl.DataFrame, y=None):
         """
         Fit the transformer by checking for valid coordinate names and calculating the mean center.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
@@ -203,16 +194,16 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         self.is_fitted = True
         return self
 
-    def transform(self, X, y=None):
+    def transform(self, X: pl.DataFrame, y=None):
         """
-        Apply the coordinate rotations and return the modified data.
+        Rotate the coordinates and return the modified data.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in transformation.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: Transformed data with additional rotated coordinates.
+        pl.DataFrame: Transformed data with additional rotated coordinates.
         """
         x_coord, y_coord = self.coordinates_names
         rotated_coordinates_names = [x_coord, y_coord]
@@ -227,23 +218,18 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
             )
          
             # Add the rotated coordinates to the data
-            if isinstance(X, pl.DataFrame):
-                X = X.with_columns(
-                    [
-                        x_temp.alias(f"{x_coord}_rotated{i}"),
-                        y_temp.alias(f"{y_coord}_rotated{i}")
-                    ]
-                )
-            if isinstance(X, pd.DataFrame):
-                X[f"{x_coord}_rotated{i}"] = x_temp
-                X[f"{y_coord}_rotated{i}"] = y_temp
-
+            X = X.with_columns(
+                [
+                    x_temp.alias(f"{x_coord}_rotated{i}"),
+                    y_temp.alias(f"{y_coord}_rotated{i}")
+                ]
+            )
             rotated_coordinates_names = rotated_coordinates_names + [
                 f"{x_coord}_rotated{i}", f"{y_coord}_rotated{i}"
             ]
 
         self.rotated_coordinates_names = rotated_coordinates_names
-        self.names_features_output = X.columns.tolist() if isinstance(X, pd.DataFrame) else X.columns
+        self.names_features_output = X.columns
         return X
 
     def fit_transform(self, X, y=None):
@@ -251,11 +237,11 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         Fit and transform the data in one step.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: Transformed data.
+        pl.DataFrame: Transformed data.
         """
         self.fit(X, y)
         return self.transform(X, y)
@@ -299,12 +285,12 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         self.names_features_output = None
         return self
 
-    def fit(self, X, y=None):
+    def fit(self, X: pl.DataFrame, y=None):
         """
         Fit the transformer by validating the transaction date column.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
@@ -317,51 +303,37 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
             raise ValueError(f"Feature {transaction_date_name} is not in the data")
 
         # Raise an error if the transaction date is not a date
-        if isinstance(X, pl.DataFrame) and not isinstance(X[transaction_date_name].dtype, pl.Date):
-            raise TypeError(f"Feature {transaction_date_name} is not of type date")
-        if isinstance(X, pd.DataFrame) and not pd.api.types.is_datetime64_any_dtype(X[transaction_date_name]):
+        if not isinstance(X[transaction_date_name].dtype, pl.Date):
             raise TypeError(f"Feature {transaction_date_name} is not of type date")
 
         self.is_fitted = True
         return self
 
-    def transform(self, X, y=None):
+    def transform(self, X: pl.DataFrame, y=None):
         """
         Convert the transaction date to an integer representing the number of days since the reference date.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in transformation.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: Transformed data with integer representation of dates.
+        pl.DataFrame: Transformed data with integer representation of dates.
         """
         transaction_date_name = self.transaction_date_name
         reference_date = self.reference_date
 
         # Calculate the number of days between each date and the starting point of transaction data (January 1st, 2010)
-        if isinstance(X, pl.DataFrame):
-            X = X.with_columns(
-                (pl.col(transaction_date_name) - pl.Series([reference_date]).str.to_date()).dt.total_days().alias(f"{transaction_date_name}")
-            )
-        if isinstance(X, pd.DataFrame):
-            X.loc[:, f"{transaction_date_name}"] = (X[transaction_date_name] - pd.to_datetime(reference_date)).dt.days
+        X = X.with_columns(
+            (pl.col(transaction_date_name) - pl.Series([reference_date]).str.to_date()).dt.total_days().alias(f"{transaction_date_name}")
+        )
 
         # Store feature names
-        if isinstance(X, pl.DataFrame):
-            self.names_features_output = X.columns
-        if isinstance(X, pd.DataFrame):
-            self.names_features_output = X.columns.tolist()
-        
-        # Return a Pandas dataframe because LightGBM does not accept 
-        # Polars dataframes (yet)
-        # BALISE: C'est ici qu'il faut passer en Pandas pour un gridsearch sans CV
-        if isinstance(X, pl.DataFrame):
-            X = X.to_pandas()
+        self.names_features_output = X.columns
 
         return X
 
-    def fit_transform(self, X, y=None):
+    def fit_transform(self, X: pl.DataFrame, y=None):
 
         # Fit the transformer
         self.fit(X, y)
@@ -454,15 +426,18 @@ class TwoStepsModel(BaseEstimator):
 
     def fit(
         self,
-        X, y,
-        model_features = None,
-        X_val = None, 
-        y_val = None,
+        X: pl.DataFrame,
+        y,
+        model_features=None,
+        X_val=None,
+        y_val=None,
         sample_weight=None,
         sample_weight_val=None,
         verbose=True,
-        log_evaluation_period = 100,
-        early_stopping_rounds = 25,
+        log_evaluation_period=100,
+        early_stopping_rounds=25,
+        convert_to_pandas: bool = False,
+        convert_to_pyarrow: bool = False,
         **kwargs
         ):
 
@@ -470,10 +445,7 @@ class TwoStepsModel(BaseEstimator):
         if model_features is not None:
             self.model_features = model_features
         else:
-            if isinstance(X, pl.DataFrame):
-                self.model_features = X.columns
-            if isinstance(X, pd.DataFrame):
-                self.model_features = X.columns.tolist()
+            self.model_features = X.columns
 
         print(f"    Average observed value of the dependant variable before training: {np.mean(y)}") if verbose else None
 
@@ -486,26 +458,31 @@ class TwoStepsModel(BaseEstimator):
 
         # Fit the preprocessor
         print("    Fit the preprocessor") if verbose else None
-        if isinstance(X, pl.DataFrame):
-            self.preprocessor.fit(X.select(model_features), y)
-        elif isinstance(X, pd.DataFrame):
-            self.preprocessor.fit(X[model_features], y)
+        self.preprocessor.fit(X.select(model_features), y)
 
         # Transform the data with the preprocessor
         print("    Transform training data with the preprocessor") if verbose else None
-        if isinstance(X, pl.DataFrame):
-            X_transformed = self.preprocessor.transform(X.select(model_features))
-        elif isinstance(X, pd.DataFrame):
-            X_transformed = self.preprocessor.transform(X[model_features])
+        X_transformed = self.preprocessor.transform(X.select(model_features))
 
+        # Return a Pandas dataframe or Pyarrow Table because LightGBM does not accept 
+        # Polars dataframes (yet)
+        if convert_to_pandas:
+            X_transformed = X_transformed.to_pandas()
+        elif convert_to_pyarrow:
+            X_transformed = X_transformed.to_arrow()
+        
         # Prepare validation data is any
         if X_val is not None and y_val is not None:
             print("    Transform validation data") if verbose else None
-            if isinstance(X, pl.DataFrame):
-                X_val_transformed = self.preprocessor.transform(X_val.select(model_features))
-            elif isinstance(X, pd.DataFrame):
-                X_val_transformed = self.preprocessor.transform(X_val[model_features])
+            X_val_transformed = self.preprocessor.transform(X_val.select(model_features))
             y_val_transformed = self.transform(X_val, y_val)
+
+            # Return a Pandas dataframe or Pyarrow Table because LightGBM does not accept 
+            # Polars dataframes (yet)
+            if convert_to_pandas:
+                X_val_transformed = X_val_transformed.to_pandas()
+            elif convert_to_pyarrow:
+                X_val_transformed = X_val_transformed.to_arrow()
 
             eval_set = [
                 (X_transformed, y_transformed),
