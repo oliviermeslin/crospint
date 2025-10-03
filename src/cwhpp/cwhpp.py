@@ -327,22 +327,22 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         self
         """
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
-        transaction_date_name = self.transaction_date_name
 
         # Raise an error if the transaction date is not in the data
-        if transaction_date_name not in X.columns:
-            raise ValueError(f"Feature {transaction_date_name} is not in the data")
+        if self.transaction_date_name not in X.columns:
+            raise ValueError(f"Feature {self.transaction_date_name} is not in the data")
 
         # Raise an error if the transaction date is not a date
-        if not isinstance(X[transaction_date_name].dtype, pl.Date):
-            raise TypeError(f"Feature {transaction_date_name} is not of type date")
+        if not isinstance(X[self.transaction_date_name].dtype, pl.Date):
+            raise TypeError(f"Feature {self.transaction_date_name} is not of type date")
 
         self.is_fitted = True
         return self
 
     def transform(self, X: pl.DataFrame, y=None):
         """
-        Convert the transaction date to an integer representing the number of days since the reference date.
+        Convert the transaction date to an integer representing the number of days 
+        since the reference date.
 
         Parameters:
         X (pl.DataFrame): Input data.
@@ -352,12 +352,20 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         pl.DataFrame: Transformed data with integer representation of dates.
         """
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
-        transaction_date_name = self.transaction_date_name
-        reference_date = self.reference_date
 
-        # Calculate the number of days between each date and the starting point of transaction data (January 1st, 2010)
+        # Raise an error if the transaction date is not in the data
+        if self.transaction_date_name not in X.columns:
+            raise ValueError(f"Feature {self.transaction_date_name} is not in the data")
+
+        # Raise an error if the transaction date is not a date
+        if not isinstance(X[self.transaction_date_name].dtype, pl.Date):
+            raise TypeError(f"Feature {self.transaction_date_name} is not of type date")
+
+        # Calculate the number of days between each date and the reference date
         X = X.with_columns(
-            (pl.col(transaction_date_name) - pl.Series([reference_date]).str.to_date()).dt.total_days().alias(f"{transaction_date_name}")
+            (
+                pl.col(self.transaction_date_name) - pl.Series([self.reference_date]).str.to_date()
+            ).dt.total_days().alias(f"{self.transaction_date_name}")
         )
 
         # Store feature names
@@ -372,7 +380,7 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
 
         # Transform the data
         X = self.transform(X, y)
-    
+
         return X
 
     def get_feature_names_out(self):
