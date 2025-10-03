@@ -431,7 +431,8 @@ def create_price_model_pipeline(
 
 class TwoStepsModel(BaseEstimator):
     """
-    A custom estimator that combines two steps: transformation of the target and housing price modelling.
+    A custom estimator that combines two steps: transformation of the target 
+    and housing price modelling.
     """
     def __init__(
         self,
@@ -443,7 +444,8 @@ class TwoStepsModel(BaseEstimator):
     ):
 
         if price_sq_meter is True and floor_area_name is None:
-            raise ValueError("The model uses price per square meter, but the name of the floor area variable is missing")
+            raise ValueError("The model uses price per square meter, \
+but the name of the floor area variable is missing")
 
         self.log_transform = log_transform
         self.price_sq_meter = price_sq_meter
@@ -459,7 +461,7 @@ class TwoStepsModel(BaseEstimator):
         )
     
         self.preprocessor = self.price_model_pipeline[:-1]
-        self.model        = self.price_model_pipeline[-1]
+        self.model = self.price_model_pipeline[-1]
 
     # Pass parameters to pipeline
     def set_params(self, dico):
@@ -492,13 +494,16 @@ class TwoStepsModel(BaseEstimator):
         else:
             self.model_features = X.columns
 
-        print(f"    Average observed value of the dependant variable before training: {np.mean(y)}") if verbose else None
+        print(f"    Average value of y before transformation: {np.mean(y)}") \
+            if verbose else None
 
         # Transform the target according to the settings
-        print("    Transforming the target") if verbose and (self.log_transform or self.price_sq_meter) else None
+        print("    Transforming the target") if verbose \
+            and (self.log_transform or self.price_sq_meter) else None
         y_transformed = self.transform(X, y)
 
-        print(f"    Average observed value of the dependant variable after transformation: {np.mean(y_transformed)}") if verbose else None
+        print(f"    Average value of y after transformation: {np.mean(y_transformed)}") \
+            if verbose else None
 
         # Fit the preprocessor
         print("    Fit the preprocessor") if verbose else None
@@ -507,7 +512,7 @@ class TwoStepsModel(BaseEstimator):
         # Transform the data with the preprocessor
         print("    Transform training data with the preprocessor") if verbose else None
         X_transformed = self.preprocessor.transform(X.select(model_features))
-        
+
         # Prepare validation data is any
         if X_val is not None and y_val is not None:
             print("    Transform validation data") if verbose else None
@@ -569,10 +574,12 @@ class TwoStepsModel(BaseEstimator):
 
         end_time = time.monotonic()
 
-        print(f"    Training time of the price prediction model: {end_time - start_time} seconds") if verbose else None
+        print(f"    Training time of the price prediction model: {end_time - start_time} seconds") \
+            if verbose else None
 
         if self.log_transform:
-            # Compute the model's RMSE and correction term (useful for the retransformation correction)
+            # Compute the model's RMSE and correction term
+            # (useful for the retransformation correction)
             print("    Compute the model's correction terms") if verbose else None
             if X_val is not None and y_val is not None:
                 y_val_pred = self.price_model_pipeline.predict(X_val)
@@ -593,15 +600,14 @@ class TwoStepsModel(BaseEstimator):
         return self
 
     def transform(self, X, y):
-        y_transform = np.copy(y)
 
         # Compute the price per square meter
         if self.price_sq_meter:
-            y_transform = y_transform / X[self.floor_area_name].to_numpy()
+            y = y / X[self.floor_area_name].to_numpy()
         # Take the logarithm
         if self.log_transform:
-            y_transform = np.log(y_transform)
-        return y_transform
+            y = np.log(y)
+        return y
 
     def inverse_transform(self, X, y):
         # Retransform y to get a market value estimate
@@ -639,25 +645,33 @@ class TwoStepsModel(BaseEstimator):
         y_pred = self.price_model_pipeline.predict(X)
 
         # Invert the target transformation
-        print("    Invert the target transformation") if verbose and (self.price_sq_meter or self.log_transform) else None
+        print("    Invert the target transformation") if verbose \
+            and (self.price_sq_meter or self.log_transform) else None
         y_pred = self.inverse_transform(X, y_pred)
 
         if self.log_transform:
             if add_retransformation_correction:
-                print("    The models includes a correction of the retransformation bias.") if verbose else None
+                print("    The models includes a correction of the retransformation bias.") \
+                    if verbose else None
+                # Use the Duan's 1983 smearing factor correction
                 if retransformation_method == "Duan":
-                    print("    The retransformation bias is corrected using Duan's 1983 smearing factor.") if verbose else None
-                    # Use the Duan's 1983 smearing factor correction
+                    print("    The prediction is corrected using Duan's 1983 smearing factor.") \
+                        if verbose else None
                     global_correction = self.smearing_factor
-                if retransformation_method == "Miller":
-                    print("    The retransformation bias is corrected using Miller's 1984 correction factor.") if verbose else None
-                    # Use the Miller's 1984 retransformation correction
+                # Use the Miller's 1984 retransformation correction
+                elif retransformation_method == "Miller":
+                    print("    The prediction is corrected using Miller's 1984 method.") \
+                        if verbose else None
                     global_correction = np.exp((self.RMSE ** 2) / 2)
                 print("    Average correction = ", round(100 * (global_correction - 1), 2), '%')
+
+                # Apply the correction to the prediction
                 y_pred = y_pred * global_correction
             else:
-                print("    There is no correction for the retransformation bias.") if verbose else None
+                print("    There is no correction for the retransformation bias.") \
+                    if verbose else None
         else:
-            print("    The model has no log-transformation.") if verbose else None
+            print("    The model has no log-transformation.") \
+                if verbose else None
 
         return y_pred
