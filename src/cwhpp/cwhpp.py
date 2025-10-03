@@ -259,6 +259,22 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         """
         return self.names_features_output
 
+
+def is_valid_ymd(date_str: [str, list]):
+    if isinstance(date_str, str):
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return False
+    elif isinstance(date_str, list):
+        for date in date_str:
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                return False
+    return True
+
+
 # A custom transformer to convert a date variable to a numerical variable
 class ConvertDateToInteger(BaseEstimator, TransformerMixin):
     """
@@ -269,6 +285,11 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
     reference_date (str): Reference date in YYYY-MM-DD format. Defaults to "2010-01-01".
     """
     def __init__(self, transaction_date_name: str = None, reference_date: str = "2010-01-01"):
+
+        # Check if the reference date is valid
+        if not is_valid_ymd(reference_date):
+            raise ValueError("The reference date is not valid. The format must be 'YYYY-MM-DD'.")
+
         self.transaction_date_name = transaction_date_name
         self.reference_date = reference_date
         self.is_fitted = False
@@ -284,6 +305,10 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         Returns:
         self
         """
+        # Check if the reference date is valid
+        if not is_valid_ymd(reference_date):
+            raise ValueError("The reference date is not valid. The format must be 'YYYY-MM-DD'.")
+
         self.transaction_date_name = transaction_date_name
         self.reference_date = reference_date
         self.names_features_output = None
