@@ -25,7 +25,6 @@ import time
 import copy
 import math
 import numpy as np
-import pandas as pd
 import polars as pl
 from polars import col as c
 from sklearn.base import BaseEstimator, TransformerMixin
@@ -33,11 +32,13 @@ from sklearn.pipeline import Pipeline
 from sklearn import metrics
 import lightgbm
 import time
+from datetime import datetime
+
 
 def rotate_point(x, y, angle, center=None):
     """
     Rotate a 2D point counterclockwise by a given angle (in degrees) around a given center.
-    
+
     Parameters:
     x (float or np.array): x-coordinate(s) to rotate.
     y (float or np.array): y-coordinate(s) to rotate.
@@ -57,6 +58,7 @@ def rotate_point(x, y, angle, center=None):
 
     return xx, yy
 
+
 # A custom transformer to validate the features entering the housing prices pipeline
 class ValidateFeatures(BaseEstimator, TransformerMixin):
     """
@@ -69,42 +71,36 @@ class ValidateFeatures(BaseEstimator, TransformerMixin):
         self.feature_names = None
         self.is_fitted = False
 
-    def fit(self, X, y=None):
+    def fit(self, X: pl.DataFrame, y=None):
         """
         Fit the transformer by checking for valid coordinate names and calculating the mean center.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
         self
         """
-
-        if isinstance(X, pl.DataFrame):
-            self.feature_names = X.columns
-        elif isinstance(X, pd.DataFrame):
-            self.feature_names = X.columns.tolist()
-
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
+        self.feature_names = X.columns
         self.is_fitted = True
         return self
 
-    def transform(self, X, y=None):
+    def transform(self, X: pl.DataFrame, y=None):
         """
         Validate the features
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in transformation.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: dataframe with the right features in the right order.
+        pl.DataFrame: dataframe with the right features in the right order.
         """
-        
-        if isinstance(X, pl.DataFrame):
-            features_X = X.columns
-        elif isinstance(X, pd.DataFrame):
-            features_X = X.columns.tolist()
+
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
+        features_X = X.columns
 
         missing_features = []
         for var in self.feature_names:
@@ -115,19 +111,18 @@ class ValidateFeatures(BaseEstimator, TransformerMixin):
         if len(missing_features) > 0:
             raise ValueError("Some features are missing in the data.")
 
-
         return X[self.feature_names]
 
-    def fit_transform(self, X, y=None):
+    def fit_transform(self, X: pl.DataFrame, y=None):
         """
         Fit and transform the data in one step.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: Transformed data.
+        pl.DataFrame: Transformed data.
         """
         self.fit(X, y)
         return self.transform(X, y)
@@ -172,17 +167,18 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         self.number_axis = number_axis
         return self
 
-    def fit(self, X, y=None):
+    def fit(self, X: pl.DataFrame, y=None):
         """
         Fit the transformer by checking for valid coordinate names and calculating the mean center.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
         self
         """
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
         coordinates_names = self.coordinates_names
 
         # Raise an error if the coordinates are not correct
@@ -198,7 +194,7 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         # Raise an error if the number of axis is missing
         if self.number_axis is None:
             raise ValueError("Argument number_axis is missing.")
-        
+
         x_coord, y_coord = self.coordinates_names
         # Compute the mean coordinates of the data
         self.center = (X[x_coord].mean(), X[y_coord].mean())
@@ -206,17 +202,18 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         self.is_fitted = True
         return self
 
-    def transform(self, X, y=None):
+    def transform(self, X: pl.DataFrame, y=None):
         """
-        Apply the coordinate rotations and return the modified data.
+        Rotate the coordinates and return the modified data.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in transformation.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: Transformed data with additional rotated coordinates.
+        pl.DataFrame: Transformed data with additional rotated coordinates.
         """
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
         x_coord, y_coord = self.coordinates_names
         rotated_coordinates_names = [x_coord, y_coord]
 
@@ -228,25 +225,20 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
                 angle=360 * (i / self.number_axis),
                 center=self.center
             )
-         
-            # Add the rotated coordinates to the data
-            if isinstance(X, pl.DataFrame):
-                X = X.with_columns(
-                    [
-                        x_temp.alias(f"{x_coord}_rotated{i}"),
-                        y_temp.alias(f"{y_coord}_rotated{i}")
-                    ]
-                )
-            if isinstance(X, pd.DataFrame):
-                X[f"{x_coord}_rotated{i}"] = x_temp
-                X[f"{y_coord}_rotated{i}"] = y_temp
 
+            # Add the rotated coordinates to the data
+            X = X.with_columns(
+                [
+                    x_temp.alias(f"{x_coord}_rotated{i}"),
+                    y_temp.alias(f"{y_coord}_rotated{i}")
+                ]
+            )
             rotated_coordinates_names = rotated_coordinates_names + [
                 f"{x_coord}_rotated{i}", f"{y_coord}_rotated{i}"
             ]
 
         self.rotated_coordinates_names = rotated_coordinates_names
-        self.names_features_output = X.columns.tolist() if isinstance(X, pd.DataFrame) else X.columns
+        self.names_features_output = X.columns
         return X
 
     def fit_transform(self, X, y=None):
@@ -254,11 +246,11 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         Fit and transform the data in one step.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: Transformed data.
+        pl.DataFrame: Transformed data.
         """
         self.fit(X, y)
         return self.transform(X, y)
@@ -272,6 +264,29 @@ class AddCoordinatesRotation(BaseEstimator, TransformerMixin):
         """
         return self.names_features_output
 
+
+def is_valid_ymd(date_str: [str, list]):
+    """
+    Validate whether a date or a list of dates are string in the 'YYYY-MM-DD' format
+
+    Returns:
+    list: Names of the transformed features.
+    """
+    if isinstance(date_str, str):
+        try:
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return False
+    elif isinstance(date_str, list):
+        for date in date_str:
+            try:
+                datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                return False
+    return True
+
+
+# A custom transformer to convert a date variable to a numerical variable
 class ConvertDateToInteger(BaseEstimator, TransformerMixin):
     """
     A custom transformer to convert transaction dates to integers (days since a reference date).
@@ -281,6 +296,11 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
     reference_date (str): Reference date in YYYY-MM-DD format. Defaults to "2010-01-01".
     """
     def __init__(self, transaction_date_name: str = None, reference_date: str = "2010-01-01"):
+
+        # Check if the reference date is valid
+        if not is_valid_ymd(reference_date):
+            raise ValueError("The reference date is not valid. The format must be 'YYYY-MM-DD'.")
+
         self.transaction_date_name = transaction_date_name
         self.reference_date = reference_date
         self.is_fitted = False
@@ -296,84 +316,81 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         Returns:
         self
         """
+        # Check if the reference date is valid
+        if not is_valid_ymd(reference_date):
+            raise ValueError("The reference date is not valid. The format must be 'YYYY-MM-DD'.")
+
         self.transaction_date_name = transaction_date_name
         self.reference_date = reference_date
         self.names_features_output = None
         return self
 
-    def fit(self, X, y=None):
+    def fit(self, X: pl.DataFrame, y=None):
         """
         Fit the transformer by validating the transaction date column.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in fitting.
 
         Returns:
         self
         """
-        transaction_date_name = self.transaction_date_name
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
 
         # Raise an error if the transaction date is not in the data
-        if transaction_date_name not in X.columns:
-            raise ValueError(f"Feature {transaction_date_name} is not in the data")
+        if self.transaction_date_name not in X.columns:
+            raise ValueError(f"Feature {self.transaction_date_name} is not in the data")
 
         # Raise an error if the transaction date is not a date
-        if isinstance(X, pl.DataFrame) and not isinstance(X[transaction_date_name].dtype, pl.Date):
-            raise TypeError(f"Feature {transaction_date_name} is not of type date")
-        if isinstance(X, pd.DataFrame) and not pd.api.types.is_datetime64_any_dtype(X[transaction_date_name]):
-            raise TypeError(f"Feature {transaction_date_name} is not of type date")
+        if not isinstance(X[self.transaction_date_name].dtype, pl.Date):
+            raise TypeError(f"Feature {self.transaction_date_name} is not of type date")
 
         self.is_fitted = True
         return self
 
-    def transform(self, X, y=None):
+    def transform(self, X: pl.DataFrame, y=None):
         """
-        Convert the transaction date to an integer representing the number of days since the reference date.
+        Convert the transaction date to an integer representing the number of days
+        since the reference date.
 
         Parameters:
-        X (pd.DataFrame or pl.DataFrame): Input data.
+        X (pl.DataFrame): Input data.
         y (optional): Target values, not used in transformation.
 
         Returns:
-        pd.DataFrame or pl.DataFrame: Transformed data with integer representation of dates.
+        pl.DataFrame: Transformed data with integer representation of dates.
         """
-        transaction_date_name = self.transaction_date_name
-        reference_date = self.reference_date
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
 
-        # Calculate the number of days between each date and the starting point of transaction data (January 1st, 2010)
-        if isinstance(X, pl.DataFrame):
-            X = X.with_columns(
-                (pl.col(transaction_date_name) - pl.Series([reference_date]).str.to_date()).dt.total_days().alias(f"{transaction_date_name}")
-            )
-        if isinstance(X, pd.DataFrame):
-            X.loc[:, f"{transaction_date_name}"] = (X[transaction_date_name] - pd.to_datetime(reference_date)).dt.days
+        # Raise an error if the transaction date is not in the data
+        if self.transaction_date_name not in X.columns:
+            raise ValueError(f"Feature {self.transaction_date_name} is not in the data")
+
+        # Raise an error if the transaction date is not a date
+        if not isinstance(X[self.transaction_date_name].dtype, pl.Date):
+            raise TypeError(f"Feature {self.transaction_date_name} is not of type date")
+
+        # Calculate the number of days between each date and the reference date
+        X = X.with_columns(
+            (
+                pl.col(self.transaction_date_name) - pl.Series([self.reference_date]).str.to_date()
+            ).dt.total_days().alias(f"{self.transaction_date_name}")
+        )
 
         # Store feature names
-        if isinstance(X, pl.DataFrame):
-            self.names_features_output = X.columns
-        if isinstance(X, pd.DataFrame):
-            self.names_features_output = X.columns.tolist()
-        
-        # Return a Pandas dataframe because LightGBM does not accept 
-        # Polars dataframes (yet)
-        # BALISE: C'est ici qu'il faut passer en Pandas pour un gridsearch sans CV
-        if isinstance(X, pl.DataFrame):
-            X = X.to_pandas()
+        self.names_features_output = X.columns
 
         return X
 
-    def fit_transform(self, X, y=None):
-        """
-        Apply the transform and the fit methods to the data.
-        """
+    def fit_transform(self, X: pl.DataFrame, y=None):
 
         # Fit the transformer
         self.fit(X, y)
 
         # Transform the data
         X = self.transform(X, y)
-    
+
         return X
 
     def get_feature_names_out(self):
@@ -385,16 +402,17 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         """
         return self.names_features_output
 
+
 def create_price_model_pipeline(
-    model=lightgbm.LGBMRegressor(), 
-    presence_coordinates = True
-    ):
+    model=lightgbm.LGBMRegressor(),
+    presence_coordinates=True
+):
     """
     Create a pipeline for housing prices modelling
 
     Parameters:
-    model (BaseEstimator, optional): Model to use for the housing prices modelling. Defaults to LGBMRegressor.
-    presence_coordinates (boolean, default = True): do features contain geographical coordinates of housing units?
+    model (BaseEstimator, optional): Model to use for the housing prices modelling.
+    Defaults to LGBMRegressor.
 
     Returns:
     Pipeline: The constructed pipeline.
@@ -420,64 +438,10 @@ def create_price_model_pipeline(
     return pipe
 
 
-
 class TwoStepsModel(BaseEstimator):
     """
-    A custom estimator for housing price prediction with optional target transformation.
-
-    This model supports:
-      - log-transform of the target variable,
-      - normalization of price by floor area (price per square meter),
-      - pipeline preprocessing of features (with or without coordinates),
-      - automatic retransformation bias correction (Duan, 1983; Miller, 1984).
-
-    Parameters
-    ----------
-    model : estimator, default=lightgbm.LGBMRegressor()
-        The regression model to use (must follow the scikit-learn API).
-    
-    log_transform : bool, optional (default=None)
-        If True, applies a logarithmic transformation to the target variable.
-
-    price_sq_meter : bool, optional (default=None)
-        If True, converts the target variable to price per square meter.
-        Requires `floor_area_name` to be provided.
-
-    presence_coordinates : bool, default=True
-        If True, include coordinate-related preprocessing in the pipeline.
-
-    floor_area_name : str, optional (default=None)
-        Column name for floor area, required if `price_sq_meter=True`.
-
-    Attributes
-    ----------
-    price_model_pipeline : sklearn.Pipeline
-        The full pipeline combining preprocessing and the regression model.
-
-    preprocessor : sklearn.TransformerMixin
-        The preprocessing step of the pipeline (all steps before the model).
-
-    model : estimator
-        The final regression model from the pipeline.
-
-    model_features : list of str
-        List of feature names used for training.
-
-    is_price_model_fitted : bool
-        Indicates if the model has been fitted.
-
-    RMSE : float
-        Root mean squared error of the fitted model (if log-transform is applied).
-
-    smearing_factor : float
-        Duan’s smearing factor, used for retransformation bias correction (if log-transform is applied).
-
-    source_RMSE : {"Train", "Val"}
-        Indicates whether RMSE was computed on training or validation data.
-
-    source_correction_terms : {"Train", "Val"}
-        Indicates the data source used to compute retransformation correction factors.
-
+    A custom estimator that combines two steps: transformation of the target
+    and housing price modelling.
     """
     def __init__(
         self,
@@ -489,7 +453,8 @@ class TwoStepsModel(BaseEstimator):
     ):
 
         if price_sq_meter is True and floor_area_name is None:
-            raise ValueError("The model uses price per square meter, but the name of the floor area variable is missing")
+            raise ValueError("The model uses price per square meter, \
+but the name of the floor area variable is missing")
 
         self.log_transform = log_transform
         self.price_sq_meter = price_sq_meter
@@ -503,9 +468,9 @@ class TwoStepsModel(BaseEstimator):
             model=model,
             presence_coordinates=presence_coordinates
         )
-    
+
         self.preprocessor = self.price_model_pipeline[:-1]
-        self.model        = self.price_model_pipeline[-1]
+        self.model = self.price_model_pipeline[-1]
 
     # Pass parameters to pipeline
     def set_params(self, dico):
@@ -514,99 +479,51 @@ class TwoStepsModel(BaseEstimator):
 
     def fit(
         self,
-        X, y,
-        model_features = None,
-        X_val = None,
-        y_val = None,
+        X: pl.DataFrame,
+        y,
+        model_features=None,
+        X_val=None,
+        y_val=None,
         sample_weight=None,
         sample_weight_val=None,
         verbose=True,
-        log_evaluation_period = 100,
-        early_stopping_rounds = 25,
+        log_evaluation_period=100,
+        early_stopping_rounds=25,
         **kwargs
     ):
-        """
-        Fit the TwoStepsModel.
 
-        Parameters
-        ----------
-        X : pd.DataFrame or pl.DataFrame
-            Feature matrix for training.
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
+        assert isinstance(X_val, pl.DataFrame), "X_val must be a Polars DataFrame"
 
-        y : array-like
-            Target variable.
-
-        model_features : list of str, optional
-            Explicit list of feature names to use. If None, inferred from `X`.
-
-        X_val : pd.DataFrame or pl.DataFrame, optional
-            Validation feature matrix.
-
-        y_val : array-like, optional
-            Validation target variable.
-
-        sample_weight : array-like, optional
-            Sample weights for training data.
-
-        sample_weight_val : array-like, optional
-            Sample weights for validation data.
-
-        verbose : bool, default=True
-            Whether to print progress messages.
-
-        log_evaluation_period : int, default=100
-            Period for LightGBM logging callbacks.
-
-        early_stopping_rounds : int, default=25
-            Number of rounds for LightGBM early stopping.
-
-        **kwargs : dict
-            Additional arguments passed to the underlying estimator's `fit` method.
-
-        Returns
-        -------
-        self : TwoStepsModel
-            Fitted estimator.
-        """
         # Store feature names
         if model_features is not None:
             self.model_features = model_features
         else:
-            if isinstance(X, pl.DataFrame):
-                self.model_features = X.columns
-            if isinstance(X, pd.DataFrame):
-                self.model_features = X.columns.tolist()
+            self.model_features = X.columns
 
-        print(f"    Average observed value of the dependant variable before training: {np.mean(y)}") if verbose else None
+        print(f"    Average value of y before transformation: {np.mean(y)}") \
+            if verbose else None
 
         # Transform the target according to the settings
-        print("    Transforming the target") if verbose and (self.log_transform or self.price_sq_meter) else None
+        print("    Transforming the target") if verbose \
+            and (self.log_transform or self.price_sq_meter) else None
         y_transformed = self.transform(X, y)
 
-        print(f"    Average observed value of the dependant variable after transformation: {np.mean(y_transformed)}") if verbose else None
-
+        print(f"    Average value of y after transformation: {np.mean(y_transformed)}") \
+            if verbose else None
 
         # Fit the preprocessor
         print("    Fit the preprocessor") if verbose else None
-        if isinstance(X, pl.DataFrame):
-            self.preprocessor.fit(X.select(model_features), y)
-        elif isinstance(X, pd.DataFrame):
-            self.preprocessor.fit(X[model_features], y)
+        self.preprocessor.fit(X.select(model_features), y)
 
         # Transform the data with the preprocessor
         print("    Transform training data with the preprocessor") if verbose else None
-        if isinstance(X, pl.DataFrame):
-            X_transformed = self.preprocessor.transform(X.select(model_features))
-        elif isinstance(X, pd.DataFrame):
-            X_transformed = self.preprocessor.transform(X[model_features])
+        X_transformed = self.preprocessor.transform(X.select(model_features))
 
         # Prepare validation data is any
         if X_val is not None and y_val is not None:
             print("    Transform validation data") if verbose else None
-            if isinstance(X, pl.DataFrame):
-                X_val_transformed = self.preprocessor.transform(X_val.select(model_features))
-            elif isinstance(X, pd.DataFrame):
-                X_val_transformed = self.preprocessor.transform(X_val[model_features])
+            X_val_transformed = self.preprocessor.transform(X_val.select(model_features))
             y_val_transformed = self.transform(X_val, y_val)
 
             eval_set = [
@@ -622,11 +539,9 @@ class TwoStepsModel(BaseEstimator):
             eval_names = ["Train"]
 
         start_time = time.monotonic()
-        if str(self.price_model_pipeline[-1].__class__) in [
-            "<class 'lightgbm.sklearn.LGBMRegressor'>",
-            "<class 'functions.modelling_functions.PatchedLGBMRegressor'>"
-        ]:
-            callbacks=[
+        if "LGBMRegressor" in str(self.price_model_pipeline[-1].__class__):
+            print("    Let's train a LGBMRegressor!")
+            callbacks = [
                 lightgbm.log_evaluation(period=log_evaluation_period),
                 lightgbm.early_stopping(stopping_rounds=early_stopping_rounds)
             ]
@@ -648,32 +563,33 @@ class TwoStepsModel(BaseEstimator):
                 **kwargs
             )
 
-        elif str(self.price_model_pipeline[-1].__class__) == "<class 'sklearnex.ensemble._forest.RandomForestRegressor'>":
+        elif "RandomForestRegressor" in str(self.price_model_pipeline[-1].__class__):
+            print("    Let's train a RandomForestRegressor!")
             print("    Training the model") if verbose else None
             self.price_model_pipeline[-1].fit(
                 X_transformed,
                 y_transformed,
                 sample_weight=sample_weight
-            )            
+            )
 
         end_time = time.monotonic()
 
-        print(f"    Training time of the price prediction model: {end_time - start_time} seconds") if verbose else None
+        print(f"    Training time of the price prediction model: {end_time - start_time} seconds") \
+            if verbose else None
 
         if self.log_transform:
-            # Compute the model's RMSE and correction term (useful for the retransformation correction)
+            # Compute the model's RMSE and correction term
+            # (useful for the retransformation correction)
             print("    Compute the model's correction terms") if verbose else None
             if X_val is not None and y_val is not None:
-                y_pred = self.price_model_pipeline.predict(X_val)
-                self.RMSE = math.sqrt(metrics.mean_squared_error(y_val_transformed, y_pred))
-                self.smearing_factor = np.mean(np.exp(y_val_transformed - y_pred))
-                self.source_RMSE = "Val"
+                y_val_pred = self.price_model_pipeline.predict(X_val)
+                self.RMSE = math.sqrt(metrics.mean_squared_error(y_val_transformed, y_val_pred))
+                self.smearing_factor = np.mean(np.exp(y_val_transformed - y_val_pred))
                 self.source_correction_terms = "Val"
             else:
                 y_pred = self.price_model_pipeline.predict(X)
                 self.RMSE = math.sqrt(metrics.mean_squared_error(y_transformed, y_pred))
                 self.smearing_factor = np.mean(np.exp(y_transformed - y_pred))
-                self.source_RMSE = "Train"
                 self.source_correction_terms = "Train"
 
             print("    RMSE = ", self.RMSE)
@@ -684,31 +600,14 @@ class TwoStepsModel(BaseEstimator):
         return self
 
     def transform(self, X, y):
-        """
-        Apply target transformation according to the model specification.
-
-        Parameters
-        ----------
-        X : pd.DataFrame or pl.DataFrame
-            Feature matrix, used if `price_sq_meter=True`.
-
-        y : array-like
-            Target values to transform.
-
-        Returns
-        -------
-        y_transformed : np.ndarray
-            Transformed target values.
-        """
-        y_transform = np.copy(y)
 
         # Compute the price per square meter
         if self.price_sq_meter:
-            y_transform = y_transform / X[self.floor_area_name].to_numpy()
+            y = y / X[self.floor_area_name].to_numpy()
         # Take the logarithm
         if self.log_transform:
-            y_transform = np.log(y_transform)
-        return y_transform
+            y = np.log(y)
+        return y
 
     def inverse_transform(self, X, y):
         """
@@ -738,7 +637,7 @@ class TwoStepsModel(BaseEstimator):
 
     def predict(
         self,
-        X, 
+        X,
         iteration_range=None,
         add_retransformation_correction: bool = True,
         retransformation_method: str = "Duan",
@@ -746,63 +645,48 @@ class TwoStepsModel(BaseEstimator):
         **kwargs
     ):
 
-        """
-        Predict with the fitted model.
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
+        assert isinstance(add_retransformation_correction, bool), \
+            "add_retransformation_correction must be True or False"
 
-        Parameters
-        ----------
-        X : pd.DataFrame or pl.DataFrame
-            Feature matrix.
-
-        iteration_range : tuple, optional
-            Iteration range for boosting models (LightGBM only).
-
-        add_retransformation_correction : bool, default=True
-            Whether to apply retransformation bias correction if `log_transform=True`.
-
-        retransformation_method : {"Duan", "Miller"}, default="Duan"
-            Method for retransformation correction.
-
-        verbose : bool, default=True
-            Whether to print progress messages.
-
-        **kwargs : dict
-            Additional arguments passed to the underlying estimator's `predict` method.
-
-        Returns
-        -------
-        y_pred : np.ndarray
-            Predicted values in the original target scale.
-        """
-
-        if add_retransformation_correction is True and retransformation_method not in ["Duan", "Miller"]:
-            raise ValueError("The retransformation_method argument must be either features 'Duan' or 'Miller'.")
+        if add_retransformation_correction and retransformation_method not in ["Duan", "Miller"]:
+            raise ValueError(
+                "The retransformation_method argument must be either features 'Duan' or 'Miller'."
+            )
 
         # Predict the local average
         print("    Predicting the target") if verbose else None
         y_pred = self.price_model_pipeline.predict(X)
 
         # Invert the target transformation
-        print("    Invert the target transformation") if verbose and (self.price_sq_meter or self.log_transform) else None
+        print("    Invert the target transformation") if verbose \
+            and (self.price_sq_meter or self.log_transform) else None
         y_pred = self.inverse_transform(X, y_pred)
 
         if self.log_transform:
             if add_retransformation_correction:
-                print("    The models includes a correction of the retransformation bias.") if verbose else None
+                print("    The models includes a correction of the retransformation bias.") \
+                    if verbose else None
+                # Use the Duan's 1983 smearing factor correction
                 if retransformation_method == "Duan":
-                    print("    The retransformation bias is corrected using Duan's 1983 smearing factor.") if verbose else None
-                    # Use the Duan's 1983 smearing factor correction
+                    print("    The prediction is corrected using Duan's 1983 smearing factor.") \
+                        if verbose else None
                     global_correction = self.smearing_factor
-                if retransformation_method == "Miller":
-                    print("    The retransformation bias is corrected using Miller's 1984 correction factor.") if verbose else None
-                    # Use the Miller's 1984 retransformation correction
+                # Use the Miller's 1984 retransformation correction
+                elif retransformation_method == "Miller":
+                    print("    The prediction is corrected using Miller's 1984 method.") \
+                        if verbose else None
                     global_correction = np.exp((self.RMSE ** 2) / 2)
                 print("    Average correction = ", round(100 * (global_correction - 1), 2), '%')
+
+                # Apply the correction to the prediction
                 y_pred = y_pred * global_correction
             else:
-                print("    There is no correction for the retransformation bias.") if verbose else None
+                print("    There is no correction for the retransformation bias.") \
+                    if verbose else None
         else:
-            print("    The model has no log-transformation.") if verbose else None
+            print("    The model has no log-transformation.") \
+                if verbose else None
 
         return y_pred
 
