@@ -21,10 +21,13 @@
 # SOFTWARE.
 
 
+import time
+import copy
 import math
 import numpy as np
 import polars as pl
 import pandas as pd
+from polars import col as c
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn import metrics
@@ -698,8 +701,22 @@ but the name of the floor area variable is missing")
         return y
 
     def inverse_transform(self, X, y):
-        # Retransform y to get a market value estimate
+        """
+        Invert the target transformation according to the model specification.
 
+        Parameters
+        ----------
+        X : pd.DataFrame or pl.DataFrame
+            Feature matrix, used if `price_sq_meter=True`.
+
+        y : array-like
+            Transformed predictions to invert.
+
+        Returns
+        -------
+        y_original : np.ndarray
+            Predictions in the original target scale.
+        """
         # Take the exponential if the model uses log
         if self.log_transform:
             y = np.exp(y)
@@ -763,3 +780,72 @@ but the name of the floor area variable is missing")
                 if verbose else None
 
         return y_pred
+
+def predict_market_value(
+    X: pl.DataFrame,
+    model,
+    date_market_value = None,
+    add_retransformation_correction = False,
+    retransformation_method: str = "Duan",
+    **kwargs
+):
+    """
+    This function predicts market values.
+
+    Parameters
+    ----------
+    X : pd.DataFrame or pl.DataFrame
+        Feature matrix.
+
+    date_market_value : None or a string in the '%Y-%m-%d' format
+        The date at which market values must be predicted. See below.
+
+    add_retransformation_correction : bool, default=True
+        Whether to apply retransformation bias correction if `log_transform=True`.
+
+    retransformation_method : {"Duan", "Miller"}, default="Duan"
+        Method for retransformation correction.
+
+    This function can be used in two ways: 
+    - using the observed transaction date for each transaction (for instance in a test set);
+      In this case `date_market_value` should be set to `None`, and the transaction data
+      should be present in the features.
+    - using a constant user-chosen date (for instance January, 1st).
+      In this case `date_market_value` should be set to a date in the '%Y-%m-%d' format.
+
+    Returns
+    -------
+    market_values : np.ndarray
+        Predicted values in the original target scale.
+
+    """
+    # Extract the name of the feature containing the transaction name
+    transaction_date_name = model.price_model_pipeline["date_conversion"].transaction_date_name
+
+    if isinstance(X, pl.DataFrame):
+        feature_names = X.columns
+    elif isinstance(X, pd.DataFrame):
+        feature_names = X.columns.tolist()
+
+    if date_market_value is not None and transaction_date_name in feature_names:
+        raise ValueError(f"Data should not contain the column {transaction_date_name} if date_market_value is not None.")
+
+    if date_market_value is not None:
+        print(f'    Predicting market values at date {date_market_value}.')
+        X = (
+            X
+            .with_columns(
+                pl.lit(date_market_value).str.to_date(format = '%Y-%m-%d').alias(transaction_date_name),
+                pl.lit(date_market_value[0:4]).str.to_integer().alias("anneemut"),
+                pl.lit(date_market_value[5:7]).str.to_integer().alias("moismut")
+            )
+        )
+    elif transaction_date_name in data.columns:
+        print(f'    Predicting market values using transaction date from the data.')
+    else:
+        raise ValueError("The date for market value prediction is missing.")
+    
+    # Predict market values
+    market_values = model.predict(X, **kwargs)
+
+    return market_values
