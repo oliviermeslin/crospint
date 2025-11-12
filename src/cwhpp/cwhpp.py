@@ -781,8 +781,8 @@ but the name of the floor area variable is missing")
 def predict_market_value(
     X: pl.DataFrame,
     model,
-    date_market_value = None,
-    add_retransformation_correction = False,
+    date_market_value=None,
+    add_retransformation_correction=False,
     retransformation_method: str = "Duan",
     **kwargs
 ):
@@ -825,14 +825,15 @@ def predict_market_value(
         feature_names = X.columns.tolist()
 
     if date_market_value is not None and transaction_date_name in feature_names:
-        raise ValueError(f"Data should not contain the column {transaction_date_name} if date_market_value is not None.")
+        raise ValueError(f"Data should not contain the column {transaction_date_name} \
+            if date_market_value is not None.")
 
     if date_market_value is not None:
         print(f'    Predicting market values at date {date_market_value}.')
         X = (
             X
             .with_columns(
-                pl.lit(date_market_value).str.to_date(format = '%Y-%m-%d').alias(transaction_date_name),
+                pl.lit(date_market_value).str.to_date(format='%Y-%m-%d').alias(transaction_date_name),
                 pl.lit(date_market_value[0:4]).str.to_integer().alias("anneemut"),
                 pl.lit(date_market_value[5:7]).str.to_integer().alias("moismut")
             )
