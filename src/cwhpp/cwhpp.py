@@ -668,7 +668,7 @@ but the name of the floor area variable is missing")
             if verbose else None
 
         if self.log_transform:
-            # Compute the model's RMSE and correction term
+            # Compute the model's RMSE and the Duan 1983's correction term
             # (useful for the retransformation correction)
             print("    Compute the model's correction terms") if verbose else None
             if X_val is not None and y_val is not None:
