@@ -753,6 +753,30 @@ but the name of the floor area variable is missing")
             and (self.price_sq_meter or self.log_transform) else None
         y_pred = self.inverse_transform(X, y_pred)
 
+        # Calibrate predictions if calibration is chosen
+        if add_retransformation_correction and retransformation_method == "calibration":
+            print("    The models includes a calibration step.") \
+
+            # Calibrate the data
+            df = (
+                pl.DataFrame({"predicted_price": y_pred})
+                .join_where(
+                    self.calibration_table,
+                    # .select("lower_limit", "upper_limit", "calibration_ratio", "quantile"),
+                    (c.predicted_price >= c.lower_limit, c.predicted_price < c.upper_limit)
+                )
+                .with_columns(
+                    calibrated_price=c.predicted_price * c.calibration_ratio
+                )
+            )
+
+            if df.filter(c.calibration_ratio.is_null()).shape[0] > 0:
+                raise ValueError("At least one observation could not be calibrated. Check the calibration table")
+
+            y_pred = df["calibrated_price"].to_numpy().ravel()
+            
+            return y_pred
+
         if self.log_transform:
             if add_retransformation_correction:
                 print("    The models includes a correction of the retransformation bias.") \
