@@ -739,9 +739,9 @@ but the name of the floor area variable is missing")
         assert isinstance(add_retransformation_correction, bool), \
             "add_retransformation_correction must be True or False"
 
-        if add_retransformation_correction and retransformation_method not in ["Duan", "Miller"]:
+        if add_retransformation_correction and retransformation_method not in ["Duan", "Miller", "calibration"]:
             raise ValueError(
-                "The retransformation_method argument must be either features 'Duan' or 'Miller'."
+                "The retransformation_method argument must be either features 'Duan', 'Miller' or 'calibration'."
             )
 
         # Predict the local average
