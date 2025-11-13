@@ -759,8 +759,6 @@ but the name of the floor area variable is missing")
         print("    Predicting the target") if verbose else None
         y_pred = self.price_model_pipeline.predict(X)
 
-        print(y_pred.__class__)
-
         # Invert the target transformation
         print("    Invert the target transformation") if verbose \
             and (self.price_sq_meter or self.log_transform) else None
