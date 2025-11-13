@@ -867,7 +867,8 @@ but the name of the floor area variable is missing")
                 lower_limit=c.upper_limit.shift(1, fill_value=-np.inf)
             )
             .select("quantile", "lower_limit", "upper_limit", "total_y_val_pred")
-
+        )
+        
         self.calibration_table = (
             predicted_totals
             .join(
