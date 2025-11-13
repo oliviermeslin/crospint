@@ -29,6 +29,7 @@ from polars import col as c
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
+from sklearn.isotonic import IsotonicRegression
 from sklearn import metrics
 import lightgbm
 from datetime import datetime
@@ -549,7 +550,7 @@ but the name of the floor area variable is missing")
         self.presence_coordinates = presence_coordinates
         self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
         self.floor_area_name = floor_area_name
-        self.calibration_table = None
+        self.calibration_function = None
 
         print("    Initiating an unfitted price prediction pipeline.")
         self.price_model_pipeline = create_price_model_pipeline(
@@ -667,23 +668,33 @@ but the name of the floor area variable is missing")
         print(f"    Training time of the price prediction model: {end_time - start_time} seconds") \
             if verbose else None
 
+        print("    Fit calibration and correction terms") if verbose else None
+        if X_val is not None and y_val is not None:
+            y_pred = self.price_model_pipeline.predict(X_val)
+            y_true = y_val_transformed
+            self.source_correction_terms = "Val"
+        else:
+            y_pred = self.price_model_pipeline.predict(X)
+            y_true = y_transformed
+            self.source_correction_terms = "Train"
+
         if self.log_transform:
             # Compute the model's RMSE and the Duan 1983's correction term
             # (useful for the retransformation correction)
             print("    Compute the model's correction terms") if verbose else None
-            if X_val is not None and y_val is not None:
-                y_val_pred = self.price_model_pipeline.predict(X_val)
-                self.RMSE = math.sqrt(metrics.mean_squared_error(y_val_transformed, y_val_pred))
-                self.smearing_factor = np.mean(np.exp(y_val_transformed - y_val_pred))
-                self.source_correction_terms = "Val"
-            else:
-                y_pred = self.price_model_pipeline.predict(X)
-                self.RMSE = math.sqrt(metrics.mean_squared_error(y_transformed, y_pred))
-                self.smearing_factor = np.mean(np.exp(y_transformed - y_pred))
-                self.source_correction_terms = "Train"
+            self.RMSE = math.sqrt(metrics.mean_squared_error(y_true, y_pred))
+            self.smearing_factor = np.mean(np.exp(y_true - y_pred))
 
             print("    RMSE = ", self.RMSE)
             print("    Smearing factor = ", self.smearing_factor)
+
+        # Fit the calibration function
+        calibration_function = IsotonicRegression(out_of_bounds="clip")
+        calibration_function.fit(
+            sorted(y_pred),
+            sorted(y_true) / sorted(y_pred)
+        )
+        self.calibration_function = calibration_function
 
         self.is_price_model_fitted = True
 
@@ -748,6 +759,8 @@ but the name of the floor area variable is missing")
         print("    Predicting the target") if verbose else None
         y_pred = self.price_model_pipeline.predict(X)
 
+        print(y_pred.__class__)
+
         # Invert the target transformation
         print("    Invert the target transformation") if verbose \
             and (self.price_sq_meter or self.log_transform) else None
@@ -758,24 +771,9 @@ but the name of the floor area variable is missing")
             print("    The models includes a calibration step.") \
 
             # Calibrate the data
-            df = (
-                pl.DataFrame({"predicted_price": y_pred})
-                .join_where(
-                    self.calibration_table,
-                    # .select("lower_limit", "upper_limit", "calibration_ratio", "quantile"),
-                    (c.predicted_price >= c.lower_limit, c.predicted_price < c.upper_limit)
-                )
-                .with_columns(
-                    calibrated_price=c.predicted_price * c.calibration_ratio
-                )
-            )
+            y_pred_calibrated = y_pred * self.calibration_function(y_pred)
 
-            if df.filter(c.calibration_ratio.is_null()).shape[0] > 0:
-                raise ValueError("At least one observation could not be calibrated. Check the calibration table")
-
-            y_pred = df["calibrated_price"].to_numpy().ravel()
-            
-            return y_pred
+            return y_pred_calibrated
 
         if self.log_transform:
             if add_retransformation_correction:
