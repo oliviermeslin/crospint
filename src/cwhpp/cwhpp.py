@@ -736,7 +736,10 @@ but the name of the floor area variable is missing")
 
         return y
 
-    def assert_is_1d_array(obj):
+    def assert_is_1d_array(
+        self,
+        obj
+    ):
         if obj is not None:
             assert isinstance(obj, np.ndarray), "Object is not a numpy array"
             assert obj.ndim == 1, "Array is not 1-dimensional"
