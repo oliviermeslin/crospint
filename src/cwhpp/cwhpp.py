@@ -551,6 +551,8 @@ but the name of the floor area variable is missing")
         self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
         self.floor_area_name = floor_area_name
         self.calibration_function = None
+        self.y_calibration = None
+        self.y_pred_calibration = None
 
         print("    Initiating an unfitted price prediction pipeline.")
         self.price_model_pipeline = create_price_model_pipeline(
@@ -668,20 +670,20 @@ but the name of the floor area variable is missing")
         print(f"    Training time of the price prediction model: {end_time - start_time} seconds") \
             if verbose else None
 
-        print("    Fit calibration and correction terms") if verbose else None
+        print("    Fit correction terms") if verbose else None
         if X_val is not None and y_val is not None:
             y_pred = self.price_model_pipeline.predict(X_val)
             y_true = y_val_transformed
             # We need the prediction in level to build the calibration function
-            y_pred_level = self.inverse_transform(X_val, y_pred)
-            y_true_level = y_val
+            self.y_pred_calibration = self.inverse_transform(X_val, y_pred)
+            self.y_calibration = y_val
             self.source_correction_terms = "Val"
         else:
             y_pred = self.price_model_pipeline.predict(X)
             y_true = y_transformed
             # We need the prediction in level to build the calibration function
-            y_pred_level = self.inverse_transform(X, y_pred)
-            y_true_level = y
+            self.y_pred_calibration = self.inverse_transform(X, y_pred)
+            self.y_calibration = y
             self.source_correction_terms = "Train"
 
         if self.log_transform:
@@ -693,14 +695,6 @@ but the name of the floor area variable is missing")
 
             print("    RMSE = ", self.RMSE)
             print("    Smearing factor = ", self.smearing_factor)
-
-        # Fit the calibration function
-        calibration_function = IsotonicRegression(out_of_bounds="clip")
-        calibration_function.fit(
-            np.sort(y_pred_level),
-            np.sort(y_true_level) / np.sort(y_pred_level)
-        )
-        self.calibration_function = calibration_function
 
         self.is_price_model_fitted = True
 
@@ -741,6 +735,50 @@ but the name of the floor area variable is missing")
             y = y * X[self.floor_area_name].to_numpy()
 
         return y
+
+    def assert_is_1d_array(obj):
+        if obj is not None:
+            assert isinstance(obj, np.ndarray), "Object is not a numpy array"
+            assert obj.ndim == 1, "Array is not 1-dimensional"
+
+    def calibrate_model(
+        self,
+        y=None,
+        y_pred=None,
+        quantile_start: float = 0,
+        quantile_end: float = 1
+    ):
+
+        self.assert_is_1d_array(y)
+        self.assert_is_1d_array(y_pred)
+        if y is None or y_pred is None:
+            print(f"Calibrating the model using {self.source_correction_terms} data used \
+in training")
+            y = self.y_calibration
+            y_pred = self.y_pred_calibration
+
+        # Fit the calibration function on the whole distribution
+        cal_func = IsotonicRegression(out_of_bounds="clip")
+        cal_func.fit(
+            np.sort(y_pred),
+            np.sort(y) / np.sort(y_pred)
+        )
+
+        if quantile_start > 0 or quantile_end < 1:
+            print(f"Restricting the calibration to the [{quantile_start}; {quantile_end}] range")
+            lower_bound = cal_func.predict(np.quantile(y_pred, [quantile_start])).tolist()[0]
+            upper_bound = cal_func.predict(np.quantile(y_pred, [quantile_end])).tolist()[0]
+            cal_func = IsotonicRegression(
+                out_of_bounds="clip",
+                y_min=lower_bound,
+                y_max=upper_bound
+            )
+            cal_func.fit(
+                np.sort(y_pred),
+                np.sort(y) / np.sort(y_pred)
+            )
+
+        self.calibration_function = cal_func
 
     def predict(
         self,
