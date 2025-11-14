@@ -677,6 +677,7 @@ but the name of the floor area variable is missing")
             # We need the prediction in level to build the calibration function
             self.y_pred_calibration = self.inverse_transform(X_val, y_pred)
             self.y_calibration = y_val
+            self.floor_area_calibration = X_val[self.floor_area_name].to_numpy()
             self.source_correction_terms = "Val"
         else:
             y_pred = self.price_model_pipeline.predict(X)
@@ -684,6 +685,7 @@ but the name of the floor area variable is missing")
             # We need the prediction in level to build the calibration function
             self.y_pred_calibration = self.inverse_transform(X, y_pred)
             self.y_calibration = y
+            self.floor_area_calibration = X[self.floor_area_name].to_numpy()
             self.source_correction_terms = "Train"
 
         if self.log_transform:
