@@ -767,32 +767,30 @@ in training")
             y_pred = self.y_pred_calibration
             floor_area = self.floor_area_calibration
 
+        if calibration_mode == "price_sqm":
+            y = y / floor_area
+            y_pred = y_pred / floor_area
+
         # Fit the calibration function on the whole distribution
         cal_func = IsotonicRegression(out_of_bounds="clip")
-        if calibration_mode == "price":
-            cal_func.fit(
-                np.sort(y_pred),
-                np.sort(y) / np.sort(y_pred)
-            )
-        elif calibration_mode == "price_sqm":
-            cal_func.fit(
-                np.sort(y_pred / floor_area),
-                np.sort(y / floor_area) / np.sort(y_pred / floor_area)
-            )
+        cal_func.fit(
+            np.sort(y_pred),
+            np.sort(y) / np.sort(y_pred)
+        )
         self.calibration_mode = calibration_mode
 
         if quantile_start > 0 or quantile_end < 1:
             print(f"Restricting the calibration to the [{quantile_start}; {quantile_end}] range")
-            lower_bound = cal_func.predict(np.quantile(y_pred / floor_area, [quantile_start])).tolist()[0]
-            upper_bound = cal_func.predict(np.quantile(y_pred / floor_area, [quantile_end])).tolist()[0]
+            lower_bound = cal_func.predict(np.quantile(y_pred, [quantile_start])).tolist()[0]
+            upper_bound = cal_func.predict(np.quantile(y_pred, [quantile_end])).tolist()[0]
             cal_func = IsotonicRegression(
                 out_of_bounds="clip",
                 y_min=lower_bound,
                 y_max=upper_bound
             )
             cal_func.fit(
-                np.sort(y_pred / floor_area),
-                np.sort(y / floor_area) / np.sort(y_pred / floor_area)
+                np.sort(y_pred),
+                np.sort(y) / np.sort(y_pred)
             )
 
         self.calibration_function = cal_func
