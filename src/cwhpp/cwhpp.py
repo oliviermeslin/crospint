@@ -553,6 +553,9 @@ but the name of the floor area variable is missing")
         self.calibration_function = None
         self.y_calibration = None
         self.y_pred_calibration = None
+        self.floor_area_calibration = None
+        self.list_dates_calibration = None
+        self.calibration_data = None
 
         print("    Initiating an unfitted price prediction pipeline.")
         self.price_model_pipeline = create_price_model_pipeline(
@@ -678,6 +681,10 @@ but the name of the floor area variable is missing")
             self.y_pred_calibration = self.inverse_transform(X_val, y_pred)
             self.y_calibration = y_val
             self.floor_area_calibration = X_val[self.floor_area_name].to_numpy()
+            if "date_conversion" in [name for name, _ in self.price_model_pipeline.steps]:
+                self.transaction_date_calibration = X_val[
+                    self.price_model_pipeline["date_conversion"].transaction_date_name
+                ]
             self.source_correction_terms = "Val"
         else:
             y_pred = self.price_model_pipeline.predict(X)
@@ -686,6 +693,10 @@ but the name of the floor area variable is missing")
             self.y_pred_calibration = self.inverse_transform(X, y_pred)
             self.y_calibration = y
             self.floor_area_calibration = X[self.floor_area_name].to_numpy()
+            if "date_conversion" in [name for name, _ in self.price_model_pipeline.steps]:
+                self.transaction_date_calibration = X[
+                    self.price_model_pipeline["date_conversion"].transaction_date_name
+                ]
             self.source_correction_terms = "Train"
 
         if self.log_transform:
