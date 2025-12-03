@@ -292,25 +292,25 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
     A custom transformer to convert transaction dates to integers (days since a reference date).
 
     Parameters:
-    transaction_date_name (str): Name of the column with transaction dates.
+    date (str): Name of the column with transaction dates.
     reference_date (str): Reference date in YYYY-MM-DD format. Defaults to "2010-01-01".
     """
-    def __init__(self, transaction_date_name: str = None, reference_date: str = "2010-01-01"):
+    def __init__(self, date: str = None, reference_date: str = "2010-01-01"):
 
         # Check if the reference date is valid
         if not is_valid_ymd(reference_date):
             raise ValueError("The reference date is not valid. The format must be 'YYYY-MM-DD'.")
 
-        self.transaction_date_name = transaction_date_name
+        self.date = date
         self.reference_date = reference_date
         self.is_fitted = False
 
-    def set_params(self, transaction_date_name: str = None, reference_date: str = "2010-01-01"):
+    def set_params(self, date: str = None, reference_date: str = "2010-01-01"):
         """
         Set parameters for the transformer.
 
         Parameters:
-        transaction_date_name (str): Name of the column with transaction dates.
+        date (str): Name of the column with transaction dates.
         reference_date (str): Reference date in YYYY-MM-DD format.
 
         Returns:
@@ -320,7 +320,7 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         if not is_valid_ymd(reference_date):
             raise ValueError("The reference date is not valid. The format must be 'YYYY-MM-DD'.")
 
-        self.transaction_date_name = transaction_date_name
+        self.date = date
         self.reference_date = reference_date
         self.names_features_output = None
         return self
@@ -339,12 +339,12 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
 
         # Raise an error if the transaction date is not in the data
-        if self.transaction_date_name not in X.columns:
-            raise ValueError(f"Feature {self.transaction_date_name} is not in the data")
+        if self.date not in X.columns:
+            raise ValueError(f"Feature {self.date} is not in the data")
 
         # Raise an error if the transaction date is not a date
-        if not isinstance(X[self.transaction_date_name].dtype, pl.Date):
-            raise TypeError(f"Feature {self.transaction_date_name} is not of type date")
+        if not isinstance(X[self.date].dtype, pl.Date):
+            raise TypeError(f"Feature {self.date} is not of type date")
 
         self.is_fitted = True
         return self
@@ -364,18 +364,18 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
 
         # Raise an error if the transaction date is not in the data
-        if self.transaction_date_name not in X.columns:
-            raise ValueError(f"Feature {self.transaction_date_name} is not in the data")
+        if self.date not in X.columns:
+            raise ValueError(f"Feature {self.date} is not in the data")
 
         # Raise an error if the transaction date is not a date
-        if not isinstance(X[self.transaction_date_name].dtype, pl.Date):
-            raise TypeError(f"Feature {self.transaction_date_name} is not of type date")
+        if not isinstance(X[self.date].dtype, pl.Date):
+            raise TypeError(f"Feature {self.date} is not of type date")
 
         # Calculate the number of days between each date and the reference date
         X = X.with_columns(
             (
-                pl.col(self.transaction_date_name) - pl.Series([self.reference_date]).str.to_date()
-            ).dt.total_days().alias(f"{self.transaction_date_name}")
+                pl.col(self.date) - pl.Series([self.reference_date]).str.to_date()
+            ).dt.total_days().alias(f"{self.date}")
         )
 
         # Store feature names
@@ -683,7 +683,7 @@ but the name of the floor area variable is missing")
             self.floor_area_calibration = X_val[self.floor_area_name].to_numpy()
             if "date_conversion" in [name for name, _ in self.pipe.steps]:
                 self.transaction_date_calibration = X_val[
-                    self.pipe["date_conversion"].transaction_date_name
+                    self.pipe["date_conversion"].date
                 ]
             self.source_correction_terms = "Val"
         else:
@@ -695,7 +695,7 @@ but the name of the floor area variable is missing")
             self.floor_area_calibration = X[self.floor_area_name].to_numpy()
             if "date_conversion" in [name for name, _ in self.pipe.steps]:
                 self.transaction_date_calibration = X[
-                    self.pipe["date_conversion"].transaction_date_name
+                    self.pipe["date_conversion"].date
                 ]
             self.source_correction_terms = "Train"
 
@@ -919,15 +919,15 @@ in training")
             if apply_time_calibration:
                 df_time_calibration = (
                     X
-                    .select(self.pipe["date_conversion"].transaction_date_name)
+                    .select(self.pipe["date_conversion"].date)
                     # join_where does not keep row order, so we need a row number to put
                     # final predictions in the right order
                     .with_row_count(name="row_identifier", offset=0)
                     .with_columns(pl.Series(y_pred_calibrated).alias("y_pred_calibrated"))
                     .join_where(
                         self.time_calibration_data,
-                        pl.col(self.pipe["date_conversion"].transaction_date_name) >= pl.col("start"),
-                        pl.col(self.pipe["date_conversion"].transaction_date_name) < pl.col("end")
+                        pl.col(self.pipe["date_conversion"].date) >= pl.col("start"),
+                        pl.col(self.pipe["date_conversion"].date) < pl.col("end")
                     )
                     .with_columns(y_pred_calibrated=c.y_pred_calibrated * c.ratio)
                     .sort("row_identifier")
@@ -1008,15 +1008,15 @@ def predict_market_value(
 
     """
     # Extract the name of the feature containing the transaction name
-    transaction_date_name = model.pipe["date_conversion"].transaction_date_name
+    date = model.pipe["date_conversion"].date
 
     if isinstance(X, pl.DataFrame):
         feature_names = X.columns
     elif isinstance(X, pd.DataFrame):
         feature_names = X.columns.tolist()
 
-    if date_market_value is not None and transaction_date_name in feature_names:
-        raise ValueError(f"Data should not contain the column {transaction_date_name} \
+    if date_market_value is not None and date in feature_names:
+        raise ValueError(f"Data should not contain the column {date} \
             if date_market_value is not None.")
 
     if date_market_value is not None:
@@ -1024,12 +1024,12 @@ def predict_market_value(
         X = (
             X
             .with_columns(
-                pl.lit(date_market_value).str.to_date(format='%Y-%m-%d').alias(transaction_date_name),
+                pl.lit(date_market_value).str.to_date(format='%Y-%m-%d').alias(date),
                 pl.lit(date_market_value[0:4]).str.to_integer().alias("anneemut"),
                 pl.lit(date_market_value[5:7]).str.to_integer().alias("moismut")
             )
         )
-    elif transaction_date_name in X.columns:
+    elif date in X.columns:
         print('    Predicting market values using transaction date from the data.')
     else:
         raise ValueError("The date for market value prediction is missing.")
