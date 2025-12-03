@@ -25,9 +25,11 @@ import time
 import math
 import numpy as np
 import polars as pl
+from polars import col as c
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
+from sklearn.isotonic import IsotonicRegression
 from sklearn import metrics
 import lightgbm
 from datetime import datetime
@@ -548,6 +550,12 @@ but the name of the floor area variable is missing")
         self.presence_coordinates = presence_coordinates
         self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
         self.floor_area_name = floor_area_name
+        self.calibration_function = None
+        self.y_calibration = None
+        self.y_pred_calibration = None
+        self.floor_area_calibration = None
+        self.list_dates_calibration = None
+        self.calibration_data = None
 
         print("    Initiating an unfitted price prediction pipeline.")
         self.price_model_pipeline = create_price_model_pipeline(
@@ -665,20 +673,38 @@ but the name of the floor area variable is missing")
         print(f"    Training time of the price prediction model: {end_time - start_time} seconds") \
             if verbose else None
 
+        print("    Fit correction terms") if verbose else None
+        if X_val is not None and y_val is not None:
+            y_pred = self.price_model_pipeline.predict(X_val)
+            y_true = y_val_transformed
+            # We need the prediction in level to build the calibration function
+            self.y_pred_calibration = self.inverse_transform(X_val, y_pred)
+            self.y_calibration = y_val
+            self.floor_area_calibration = X_val[self.floor_area_name].to_numpy()
+            if "date_conversion" in [name for name, _ in self.price_model_pipeline.steps]:
+                self.transaction_date_calibration = X_val[
+                    self.price_model_pipeline["date_conversion"].transaction_date_name
+                ]
+            self.source_correction_terms = "Val"
+        else:
+            y_pred = self.price_model_pipeline.predict(X)
+            y_true = y_transformed
+            # We need the prediction in level to build the calibration function
+            self.y_pred_calibration = self.inverse_transform(X, y_pred)
+            self.y_calibration = y
+            self.floor_area_calibration = X[self.floor_area_name].to_numpy()
+            if "date_conversion" in [name for name, _ in self.price_model_pipeline.steps]:
+                self.transaction_date_calibration = X[
+                    self.price_model_pipeline["date_conversion"].transaction_date_name
+                ]
+            self.source_correction_terms = "Train"
+
         if self.log_transform:
-            # Compute the model's RMSE and correction term
+            # Compute the model's RMSE and the Duan 1983's correction term
             # (useful for the retransformation correction)
             print("    Compute the model's correction terms") if verbose else None
-            if X_val is not None and y_val is not None:
-                y_val_pred = self.price_model_pipeline.predict(X_val)
-                self.RMSE = math.sqrt(metrics.mean_squared_error(y_val_transformed, y_val_pred))
-                self.smearing_factor = np.mean(np.exp(y_val_transformed - y_val_pred))
-                self.source_correction_terms = "Val"
-            else:
-                y_pred = self.price_model_pipeline.predict(X)
-                self.RMSE = math.sqrt(metrics.mean_squared_error(y_transformed, y_pred))
-                self.smearing_factor = np.mean(np.exp(y_transformed - y_pred))
-                self.source_correction_terms = "Train"
+            self.RMSE = math.sqrt(metrics.mean_squared_error(y_true, y_pred))
+            self.smearing_factor = np.mean(np.exp(y_true - y_pred))
 
             print("    RMSE = ", self.RMSE)
             print("    Smearing factor = ", self.smearing_factor)
@@ -723,12 +749,136 @@ but the name of the floor area variable is missing")
 
         return y
 
+    def assert_is_1d_array(
+        self,
+        obj
+    ):
+        if obj is not None:
+            assert isinstance(obj, np.ndarray), "Object is not a numpy array"
+            assert obj.ndim == 1, "Array is not 1-dimensional"
+
+    def calibrate_model(
+        self,
+        y=None,
+        y_pred=None,
+        floor_area=None,
+        quantile_start: float = 0,
+        quantile_end: float = 1
+    ):
+
+        self.assert_is_1d_array(y)
+        self.assert_is_1d_array(y_pred)
+        self.assert_is_1d_array(floor_area)
+        if y is None or y_pred is None or floor_area is None:
+            print(f"Calibrating the model using {self.source_correction_terms} data used \
+in training")
+            y = self.y_calibration
+            y_pred = self.y_pred_calibration
+            floor_area = self.floor_area_calibration
+
+        self.list_dates_calibration = None
+        self.calibration_data = None
+
+        # Prepare data for calibration
+        y = np.log(y / floor_area)
+        y_pred = np.log(y_pred / floor_area)
+
+        # Fit the calibration function on the whole distribution
+        cal_func = IsotonicRegression(out_of_bounds="clip")
+        cal_func.fit(
+            np.sort(y_pred),
+            np.sort(y)
+        )
+
+        if quantile_start > 0 or quantile_end < 1:
+            print(f"Restricting the calibration to the [{quantile_start}; {quantile_end}] range")
+            lower_bound = cal_func.predict(np.quantile(y_pred, [quantile_start])).tolist()[0]
+            upper_bound = cal_func.predict(np.quantile(y_pred, [quantile_end])).tolist()[0]
+            cal_func = IsotonicRegression(
+                out_of_bounds="clip",
+                y_min=lower_bound,
+                y_max=upper_bound
+            )
+            cal_func.fit(
+                np.sort(y_pred),
+                np.sort(y)
+            )
+
+        self.calibration_function = cal_func
+
+        # Store calibration data
+        self.y_pred_calibrated = self.floor_area_calibration \
+            * np.exp(
+                self.calibration_function.predict(
+                    np.log(self.y_pred_calibration / self.floor_area_calibration)
+                )
+            )
+
+        self.calibration_data = pl.DataFrame(
+            {
+                "y": self.y_calibration,
+                "y_pred_calibration": self.y_pred_calibration,
+                "y_pred_calibrated": self.y_pred_calibrated,
+                "transaction_date": self.transaction_date_calibration
+            }
+        )
+
+    def perform_time_calibration(
+        self,
+        list_dates_calibration: list = None
+    ):
+        if self.calibration_data is None:
+            raise ValueError("The model must be calibrated before performing time calibration")
+        if list_dates_calibration is None:
+            raise ValueError("list_dates_calibration cannot be None")
+
+        self.list_dates_calibration = np.unique(list_dates_calibration).tolist()
+
+        df_time_intervals = (
+            pl.DataFrame({"start": [None] + self.list_dates_calibration})
+            .with_columns(
+                c.start.str.strptime(pl.Date, format="%Y-%m-%d")
+                .fill_null(pl.Series(["0001-01-01"]).str.strptime(pl.Date, format="%Y-%m-%d"))
+            )
+            .sort("start")
+            .with_columns(
+                end=c.start.shift(-1)
+                .fill_null(pl.Series(["3000-01-01"]).str.strptime(pl.Date, format="%Y-%m-%d"))
+            )
+        )
+
+        calibration_data_ranges = (
+            self.calibration_data
+            .join_where(
+                df_time_intervals,
+                pl.col("transaction_date") >= pl.col("start"),
+                pl.col("transaction_date") < pl.col("end")
+            )
+        )
+
+        print(self.calibration_data.shape[0])
+        print(calibration_data_ranges.shape[0])
+
+        self.time_calibration_data = (
+            calibration_data_ranges
+            .group_by("start", "end")
+            .agg(
+                total_obs=c.y.sum(),
+                total_pred=c.y_pred_calibrated.sum()
+            )
+            .with_columns(
+                ratio=c.total_obs/c.total_pred
+            )
+            .sort("start")
+        )
+
     def predict(
         self,
         X,
         iteration_range=None,
         add_retransformation_correction: bool = True,
         retransformation_method: str = "Duan",
+        apply_time_calibration: bool = False,
         verbose: bool = True,
         **kwargs
     ):
@@ -737,9 +887,9 @@ but the name of the floor area variable is missing")
         assert isinstance(add_retransformation_correction, bool), \
             "add_retransformation_correction must be True or False"
 
-        if add_retransformation_correction and retransformation_method not in ["Duan", "Miller"]:
+        if add_retransformation_correction and retransformation_method not in ["Duan", "Miller", "calibration"]:
             raise ValueError(
-                "The retransformation_method argument must be either features 'Duan' or 'Miller'."
+                "The retransformation_method argument must be either features 'Duan', 'Miller' or 'calibration'."
             )
 
         # Predict the local average
@@ -750,6 +900,48 @@ but the name of the floor area variable is missing")
         print("    Invert the target transformation") if verbose \
             and (self.price_sq_meter or self.log_transform) else None
         y_pred = self.inverse_transform(X, y_pred)
+
+        # Calibrate predictions if calibration is chosen
+        if add_retransformation_correction and retransformation_method == "calibration":
+            print("    The models includes a calibration step.") \
+
+            # Calibrate the data
+            y_pred_calibrated = (
+                X[self.floor_area_name].to_numpy() \
+                # Compute calibrated price_sqm in level
+                * np.exp(
+                    # Calibrate this raw prediction
+                    self.calibration_function.predict(
+                        # Start from raw pipeline prediction (log_price_sqm)
+                        np.log(y_pred / X[self.floor_area_name].to_numpy())
+                    )
+                )
+            )
+
+            if apply_time_calibration:
+                df_time_calibration = (
+                    X
+                    .select(self.price_model_pipeline["date_conversion"].transaction_date_name)
+                    # join_where does not keep row order, so we need a row number to put
+                    # final predictions in the right order
+                    .with_row_count(name="row_identifier", offset=0)
+                    .with_columns(pl.Series(y_pred_calibrated).alias("y_pred_calibrated"))
+                    .join_where(
+                        self.time_calibration_data,
+                        pl.col(self.price_model_pipeline["date_conversion"].transaction_date_name) >= pl.col("start"),
+                        pl.col(self.price_model_pipeline["date_conversion"].transaction_date_name) < pl.col("end")
+                    )
+                    .with_columns(y_pred_calibrated=c.y_pred_calibrated * c.ratio)
+                    .sort("row_identifier")
+                    .drop("row_identifier")
+                )
+                if X.shape[0] != df_time_calibration.shape[0]:
+                    raise ValueError("    There are duplicates in the time calibration step")
+                if df_time_calibration.filter(c.ratio.is_null()).shape[0] > 0:
+                    raise ValueError("    There are missing values in the time calibration step")
+                return df_time_calibration["y_pred_calibrated"].to_numpy()
+            else:
+                return y_pred_calibrated
 
         if self.log_transform:
             if add_retransformation_correction:
@@ -777,6 +969,7 @@ but the name of the floor area variable is missing")
                 if verbose else None
 
         return y_pred
+
 
 def predict_market_value(
     X: pl.DataFrame,

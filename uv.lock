@@ -13,7 +13,7 @@ wheels = [
 
 [[package]]
 name = "cwhpp"
-version = "0.3.3.dev0"
+version = "0.3.14"
 source = { editable = "." }
 dependencies = [
     { name = "lightgbm" },
