@@ -59,7 +59,7 @@ def rotate_point(x, y, angle, center=None):
     return xx, yy
 
 
-# A custom transformer to validate the features entering the housing prices pipeline
+# A custom transformer to validate the features entering the pipeline
 class ValidateFeatures(BaseEstimator, TransformerMixin):
     """
     A custom transformer to validate features
@@ -292,25 +292,25 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
     A custom transformer to convert transaction dates to integers (days since a reference date).
 
     Parameters:
-    transaction_date_name (str): Name of the column with transaction dates.
+    date (str): Name of the column with transaction dates.
     reference_date (str): Reference date in YYYY-MM-DD format. Defaults to "2010-01-01".
     """
-    def __init__(self, transaction_date_name: str = None, reference_date: str = "2010-01-01"):
+    def __init__(self, date_name: str = None, reference_date: str = "2010-01-01"):
 
         # Check if the reference date is valid
         if not is_valid_ymd(reference_date):
             raise ValueError("The reference date is not valid. The format must be 'YYYY-MM-DD'.")
 
-        self.transaction_date_name = transaction_date_name
+        self.date_name = date_name
         self.reference_date = reference_date
         self.is_fitted = False
 
-    def set_params(self, transaction_date_name: str = None, reference_date: str = "2010-01-01"):
+    def set_params(self, date_name: str = None, reference_date: str = "2010-01-01"):
         """
         Set parameters for the transformer.
 
         Parameters:
-        transaction_date_name (str): Name of the column with transaction dates.
+        date_name (str): Name of the column with transaction dates.
         reference_date (str): Reference date in YYYY-MM-DD format.
 
         Returns:
@@ -320,7 +320,7 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         if not is_valid_ymd(reference_date):
             raise ValueError("The reference date is not valid. The format must be 'YYYY-MM-DD'.")
 
-        self.transaction_date_name = transaction_date_name
+        self.date_name = date_name
         self.reference_date = reference_date
         self.names_features_output = None
         return self
@@ -339,12 +339,12 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
 
         # Raise an error if the transaction date is not in the data
-        if self.transaction_date_name not in X.columns:
-            raise ValueError(f"Feature {self.transaction_date_name} is not in the data")
+        if self.date_name not in X.columns:
+            raise ValueError(f"Feature {self.date_name} is not in the data")
 
         # Raise an error if the transaction date is not a date
-        if not isinstance(X[self.transaction_date_name].dtype, pl.Date):
-            raise TypeError(f"Feature {self.transaction_date_name} is not of type date")
+        if not isinstance(X[self.date_name].dtype, pl.Date):
+            raise TypeError(f"Feature {self.date_name} is not of type date")
 
         self.is_fitted = True
         return self
@@ -364,18 +364,18 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
 
         # Raise an error if the transaction date is not in the data
-        if self.transaction_date_name not in X.columns:
-            raise ValueError(f"Feature {self.transaction_date_name} is not in the data")
+        if self.date_name not in X.columns:
+            raise ValueError(f"Feature {self.date_name} is not in the data")
 
         # Raise an error if the transaction date is not a date
-        if not isinstance(X[self.transaction_date_name].dtype, pl.Date):
-            raise TypeError(f"Feature {self.transaction_date_name} is not of type date")
+        if not isinstance(X[self.date_name].dtype, pl.Date):
+            raise TypeError(f"Feature {self.date_name} is not of type date")
 
         # Calculate the number of days between each date and the reference date
         X = X.with_columns(
             (
-                pl.col(self.transaction_date_name) - pl.Series([self.reference_date]).str.to_date()
-            ).dt.total_days().alias(f"{self.transaction_date_name}")
+                pl.col(self.date_name) - pl.Series([self.reference_date]).str.to_date()
+            ).dt.total_days().alias(f"{self.date_name}")
         )
 
         # Store feature names
@@ -403,7 +403,7 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         return self.names_features_output
 
 
-# A custom transformer to validate the features entering the housing prices pipeline
+# A custom transformer to convert a polars DataFrame into Pandas
 class ConvertToPandas(BaseEstimator, TransformerMixin):
     """
     A custom transformer to transform a Polars DataFrame
@@ -465,16 +465,17 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
         return self.feature_names
 
 
-def create_price_model_pipeline(
+def create_model_pipeline(
     model=lightgbm.LGBMRegressor(),
     presence_coordinates=True,
+    presence_date=True,
     convert_to_pandas_before_fit: bool = False
 ):
     """
-    Create a pipeline for housing prices modelling
+    Create a pipeline for spatio-temporal modelling
 
     Parameters:
-    model (BaseEstimator, optional): Model to use for the housing prices modelling.
+    model (BaseEstimator, optional): Model to use as the last step of the pipeline.
     Defaults to LGBMRegressor.
 
     Returns:
@@ -483,41 +484,58 @@ def create_price_model_pipeline(
     if convert_to_pandas_before_fit:
         print("    Adding a step for Pandas conversion at the end of the preprocessing")
 
-        if presence_coordinates:
+        if presence_coordinates and presence_date:
             pipe = Pipeline(
                 [
                     ("validate_features", ValidateFeatures()),
                     ("coord_rotation", AddCoordinatesRotation()),
                     ("date_conversion", ConvertDateToInteger()),
                     ("pandas_converter", ConvertToPandas()),
-                    ("price_model", model)
+                    ("model", model)
                 ]
             )
-        else:
+        elif presence_coordinates:
+            pipe = Pipeline(
+                [
+                    ("validate_features", ValidateFeatures()),
+                    ("coord_rotation", AddCoordinatesRotation()),
+                    ("pandas_converter", ConvertToPandas()),
+                    ("model", model)
+                ]
+            )
+        elif presence_date:
             pipe = Pipeline(
                 [
                     ("validate_features", ValidateFeatures()),
                     ("date_conversion", ConvertDateToInteger()),
                     ("pandas_converter", ConvertToPandas()),
-                    ("price_model", model)
+                    ("model", model)
                 ]
             )
     else:
-        if presence_coordinates:
+        if presence_coordinates and presence_date:
             pipe = Pipeline(
                 [
                     ("validate_features", ValidateFeatures()),
                     ("coord_rotation", AddCoordinatesRotation()),
                     ("date_conversion", ConvertDateToInteger()),
-                    ("price_model", model)
+                    ("model", model)
                 ]
             )
-        else:
+        elif presence_coordinates:
+            pipe = Pipeline(
+                [
+                    ("validate_features", ValidateFeatures()),
+                    ("coord_rotation", AddCoordinatesRotation()),
+                    ("model", model)
+                ]
+            )
+        elif presence_date:
             pipe = Pipeline(
                 [
                     ("validate_features", ValidateFeatures()),
                     ("date_conversion", ConvertDateToInteger()),
-                    ("price_model", model)
+                    ("model", model)
                 ]
             )
 
@@ -535,7 +553,8 @@ class TwoStepsModel(BaseEstimator):
         log_transform=None,
         price_sq_meter=None,
         presence_coordinates=True,
-        convert_to_pandas_before_fit=False,
+        presence_date=True,
+        convert_to_pandas_before_fit=True,
         floor_area_name=None
     ):
 
@@ -546,7 +565,7 @@ but the name of the floor area variable is missing")
         self.log_transform = log_transform
         self.price_sq_meter = price_sq_meter
         self.feature_names_in = None
-        self.is_price_model_fitted = False
+        self.is_model_fitted = False
         self.presence_coordinates = presence_coordinates
         self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
         self.floor_area_name = floor_area_name
@@ -558,18 +577,18 @@ but the name of the floor area variable is missing")
         self.calibration_data = None
 
         print("    Initiating an unfitted price prediction pipeline.")
-        self.price_model_pipeline = create_price_model_pipeline(
+        self.pipe = create_model_pipeline(
             model=model,
             presence_coordinates=presence_coordinates,
             convert_to_pandas_before_fit=convert_to_pandas_before_fit
         )
 
-        self.preprocessor = self.price_model_pipeline[:-1]
-        self.model = self.price_model_pipeline[-1]
+        self.preprocessor = self.pipe[:-1]
+        self.model = self.pipe[-1]
 
     # Pass parameters to pipeline
     def set_params(self, dico):
-        self.price_model_pipeline.set_params(**dico)
+        self.pipe.set_params(**dico)
         return self
 
     def fit(
@@ -635,7 +654,7 @@ but the name of the floor area variable is missing")
             eval_names = ["Train"]
 
         start_time = time.monotonic()
-        if "LGBMRegressor" in str(self.price_model_pipeline[-1].__class__):
+        if "LGBMRegressor" in str(self.pipe[-1].__class__):
             print("    Let's train a LGBMRegressor!")
             callbacks = [
                 lightgbm.log_evaluation(period=log_evaluation_period),
@@ -648,7 +667,7 @@ but the name of the floor area variable is missing")
                 eval_sample_weight = None
 
             print("    Training the model") if verbose else None
-            self.price_model_pipeline[-1].fit(
+            self.pipe[-1].fit(
                 X_transformed,
                 y_transformed,
                 sample_weight=sample_weight,
@@ -659,10 +678,10 @@ but the name of the floor area variable is missing")
                 **kwargs
             )
 
-        elif "RandomForestRegressor" in str(self.price_model_pipeline[-1].__class__):
+        elif "RandomForestRegressor" in str(self.pipe[-1].__class__):
             print("    Let's train a RandomForestRegressor!")
             print("    Training the model") if verbose else None
-            self.price_model_pipeline[-1].fit(
+            self.pipe[-1].fit(
                 X_transformed,
                 y_transformed,
                 sample_weight=sample_weight
@@ -675,27 +694,27 @@ but the name of the floor area variable is missing")
 
         print("    Fit correction terms") if verbose else None
         if X_val is not None and y_val is not None:
-            y_pred = self.price_model_pipeline.predict(X_val)
+            y_pred = self.pipe.predict(X_val)
             y_true = y_val_transformed
             # We need the prediction in level to build the calibration function
             self.y_pred_calibration = self.inverse_transform(X_val, y_pred)
             self.y_calibration = y_val
             self.floor_area_calibration = X_val[self.floor_area_name].to_numpy()
-            if "date_conversion" in [name for name, _ in self.price_model_pipeline.steps]:
+            if "date_conversion" in [name for name, _ in self.pipe.steps]:
                 self.transaction_date_calibration = X_val[
-                    self.price_model_pipeline["date_conversion"].transaction_date_name
+                    self.pipe["date_conversion"].date_name
                 ]
             self.source_correction_terms = "Val"
         else:
-            y_pred = self.price_model_pipeline.predict(X)
+            y_pred = self.pipe.predict(X)
             y_true = y_transformed
             # We need the prediction in level to build the calibration function
             self.y_pred_calibration = self.inverse_transform(X, y_pred)
             self.y_calibration = y
             self.floor_area_calibration = X[self.floor_area_name].to_numpy()
-            if "date_conversion" in [name for name, _ in self.price_model_pipeline.steps]:
+            if "date_conversion" in [name for name, _ in self.pipe.steps]:
                 self.transaction_date_calibration = X[
-                    self.price_model_pipeline["date_conversion"].transaction_date_name
+                    self.pipe["date_conversion"].date_name
                 ]
             self.source_correction_terms = "Train"
 
@@ -709,7 +728,7 @@ but the name of the floor area variable is missing")
             print("    RMSE = ", self.RMSE)
             print("    Smearing factor = ", self.smearing_factor)
 
-        self.is_price_model_fitted = True
+        self.is_model_fitted = True
 
         return self
 
@@ -877,7 +896,7 @@ in training")
         X,
         iteration_range=None,
         add_retransformation_correction: bool = True,
-        retransformation_method: str = "Duan",
+        retransformation_method: str = None,
         apply_time_calibration: bool = False,
         verbose: bool = True,
         **kwargs
@@ -887,14 +906,14 @@ in training")
         assert isinstance(add_retransformation_correction, bool), \
             "add_retransformation_correction must be True or False"
 
-        if add_retransformation_correction and retransformation_method not in ["Duan", "Miller", "calibration"]:
+        if add_retransformation_correction and retransformation_method not in [None, "Duan", "Miller", "calibration"]:
             raise ValueError(
-                "The retransformation_method argument must be either features 'Duan', 'Miller' or 'calibration'."
+                "The retransformation_method argument must be either None, 'Duan', 'Miller' or 'calibration'."
             )
 
         # Predict the local average
         print("    Predicting the target") if verbose else None
-        y_pred = self.price_model_pipeline.predict(X)
+        y_pred = self.pipe.predict(X)
 
         # Invert the target transformation
         print("    Invert the target transformation") if verbose \
@@ -996,7 +1015,7 @@ def predict_market_value(
     retransformation_method : {"Duan", "Miller"}, default="Duan"
         Method for retransformation correction.
 
-    This function can be used in two ways: 
+    This function can be used in two ways:
     - using the observed transaction date for each transaction (for instance in a test set);
       In this case `date_market_value` should be set to `None`, and the transaction data
       should be present in the features.
@@ -1010,15 +1029,15 @@ def predict_market_value(
 
     """
     # Extract the name of the feature containing the transaction name
-    transaction_date_name = model.price_model_pipeline["date_conversion"].transaction_date_name
+    date_name = model.pipe["date_conversion"].date_name
 
     if isinstance(X, pl.DataFrame):
         feature_names = X.columns
     elif isinstance(X, pd.DataFrame):
         feature_names = X.columns.tolist()
 
-    if date_market_value is not None and transaction_date_name in feature_names:
-        raise ValueError(f"Data should not contain the column {transaction_date_name} \
+    if date_market_value is not None and date_name in feature_names:
+        raise ValueError(f"Data should not contain the column {date_name} \
             if date_market_value is not None.")
 
     if date_market_value is not None:
@@ -1026,16 +1045,16 @@ def predict_market_value(
         X = (
             X
             .with_columns(
-                pl.lit(date_market_value).str.to_date(format='%Y-%m-%d').alias(transaction_date_name),
+                pl.lit(date_market_value).str.to_date(format='%Y-%m-%d').alias(date_name),
                 pl.lit(date_market_value[0:4]).str.to_integer().alias("anneemut"),
                 pl.lit(date_market_value[5:7]).str.to_integer().alias("moismut")
             )
         )
-    elif transaction_date_name in X.columns:
+    elif date_name in X.columns:
         print('    Predicting market values using transaction date from the data.')
     else:
         raise ValueError("The date for market value prediction is missing.")
-    
+
     # Predict market values
     market_values = model.predict(X, **kwargs)
 
