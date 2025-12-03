@@ -921,29 +921,35 @@ in training")
         y_pred = self.inverse_transform(X, y_pred)
 
         # Calibrate predictions if calibration is chosen
+        # Calibrate predictions if calibration is chosen
         if add_retransformation_correction and retransformation_method == "calibration":
             print("    The models includes a calibration step.") \
 
             # Calibrate the data
-            if self.calibration_mode == "price":
-                y_pred_calibrated = y_pred \
-                    * self.calibration_function.predict(y_pred)
-            elif self.calibration_mode == "price_sqm":
-                y_pred_calibrated = y_pred \
-                    * self.calibration_function.predict(y_pred / X[self.floor_area_name].to_numpy())
+            y_pred_calibrated = (
+                X[self.floor_area_name].to_numpy() \
+                # Compute calibrated price_sqm in level
+                * np.exp(
+                    # Calibrate this raw prediction
+                    self.calibration_function.predict(
+                        # Start from raw pipeline prediction (log_price_sqm)
+                        np.log(y_pred / X[self.floor_area_name].to_numpy())
+                    )
+                )
+            )
 
             if apply_time_calibration:
                 df_time_calibration = (
                     X
-                    .select(self.pipe["date_conversion"].date_name)
+                    .select(self.price_model_pipeline["date_conversion"].transaction_date_name)
                     # join_where does not keep row order, so we need a row number to put
                     # final predictions in the right order
                     .with_row_count(name="row_identifier", offset=0)
                     .with_columns(pl.Series(y_pred_calibrated).alias("y_pred_calibrated"))
                     .join_where(
                         self.time_calibration_data,
-                        pl.col(self.pipe["date_conversion"].date_name) >= pl.col("start"),
-                        pl.col(self.pipe["date_conversion"].date_name) < pl.col("end")
+                        pl.col(self.price_model_pipeline["date_conversion"].transaction_date_name) >= pl.col("start"),
+                        pl.col(self.price_model_pipeline["date_conversion"].transaction_date_name) < pl.col("end")
                     )
                     .with_columns(y_pred_calibrated=c.y_pred_calibrated * c.ratio)
                     .sort("row_identifier")
