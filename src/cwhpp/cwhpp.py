@@ -468,13 +468,14 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
 def create_model_pipeline(
     model=lightgbm.LGBMRegressor(),
     presence_coordinates=True,
+    presence_date=True,
     convert_to_pandas_before_fit: bool = False
 ):
     """
-    Create a pipeline for housing prices modelling
+    Create a pipeline for spatio-temporal modelling
 
     Parameters:
-    model (BaseEstimator, optional): Model to use for the housing prices modelling.
+    model (BaseEstimator, optional): Model to use as the last step of the pipeline.
     Defaults to LGBMRegressor.
 
     Returns:
@@ -483,41 +484,58 @@ def create_model_pipeline(
     if convert_to_pandas_before_fit:
         print("    Adding a step for Pandas conversion at the end of the preprocessing")
 
-        if presence_coordinates:
+        if presence_coordinates and presence_date:
             pipe = Pipeline(
                 [
                     ("validate_features", ValidateFeatures()),
                     ("coord_rotation", AddCoordinatesRotation()),
                     ("date_conversion", ConvertDateToInteger()),
                     ("pandas_converter", ConvertToPandas()),
-                    ("price_model", model)
+                    ("model", model)
                 ]
             )
-        else:
+        elif presence_coordinates:
+            pipe = Pipeline(
+                [
+                    ("validate_features", ValidateFeatures()),
+                    ("coord_rotation", AddCoordinatesRotation()),
+                    ("pandas_converter", ConvertToPandas()),
+                    ("model", model)
+                ]
+            )
+        elif presence_date:
             pipe = Pipeline(
                 [
                     ("validate_features", ValidateFeatures()),
                     ("date_conversion", ConvertDateToInteger()),
                     ("pandas_converter", ConvertToPandas()),
-                    ("price_model", model)
+                    ("model", model)
                 ]
             )
     else:
-        if presence_coordinates:
+        if presence_coordinates and presence_date:
             pipe = Pipeline(
                 [
                     ("validate_features", ValidateFeatures()),
                     ("coord_rotation", AddCoordinatesRotation()),
                     ("date_conversion", ConvertDateToInteger()),
-                    ("price_model", model)
+                    ("model", model)
                 ]
             )
-        else:
+        elif presence_coordinates:
+            pipe = Pipeline(
+                [
+                    ("validate_features", ValidateFeatures()),
+                    ("coord_rotation", AddCoordinatesRotation()),
+                    ("model", model)
+                ]
+            )
+        elif presence_date:
             pipe = Pipeline(
                 [
                     ("validate_features", ValidateFeatures()),
                     ("date_conversion", ConvertDateToInteger()),
-                    ("price_model", model)
+                    ("model", model)
                 ]
             )
 
@@ -535,6 +553,7 @@ class TwoStepsModel(BaseEstimator):
         log_transform=None,
         price_sq_meter=None,
         presence_coordinates=True,
+        presence_date=True,
         convert_to_pandas_before_fit=False,
         floor_area_name=None
     ):
