@@ -59,7 +59,7 @@ def rotate_point(x, y, angle, center=None):
     return xx, yy
 
 
-# A custom transformer to validate the features entering the housing prices pipeline
+# A custom transformer to validate the features entering the pipeline
 class ValidateFeatures(BaseEstimator, TransformerMixin):
     """
     A custom transformer to validate features
@@ -403,7 +403,7 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         return self.names_features_output
 
 
-# A custom transformer to validate the features entering the housing prices pipeline
+# A custom transformer to convert a polars DataFrame into Pandas
 class ConvertToPandas(BaseEstimator, TransformerMixin):
     """
     A custom transformer to transform a Polars DataFrame
@@ -546,7 +546,7 @@ but the name of the floor area variable is missing")
         self.log_transform = log_transform
         self.price_sq_meter = price_sq_meter
         self.feature_names_in = None
-        self.is_price_model_fitted = False
+        self.is_model_fitted = False
         self.presence_coordinates = presence_coordinates
         self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
         self.floor_area_name = floor_area_name
@@ -709,7 +709,7 @@ but the name of the floor area variable is missing")
             print("    RMSE = ", self.RMSE)
             print("    Smearing factor = ", self.smearing_factor)
 
-        self.is_price_model_fitted = True
+        self.is_model_fitted = True
 
         return self
 
