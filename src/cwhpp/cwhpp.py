@@ -921,7 +921,6 @@ in training")
         y_pred = self.inverse_transform(X, y_pred)
 
         # Calibrate predictions if calibration is chosen
-        # Calibrate predictions if calibration is chosen
         if add_retransformation_correction and retransformation_method == "calibration":
             print("    The models includes a calibration step.") \
 
