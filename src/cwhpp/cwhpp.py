@@ -919,50 +919,51 @@ in training")
             and (self.price_sq_meter or self.log_transform) else None
         y_pred = self.inverse_transform(X, y_pred)
 
-        # Calibrate predictions if calibration is chosen
-        if add_retransformation_correction and retransformation_method == "calibration":
-            print("    The models includes a calibration step.") \
+        # Correct raw predictions
+        if add_retransformation_correction:
+            # Calibrate predictions if calibration is chosen
+            if retransformation_method == "calibration":
+                print("    The models includes a calibration step.")
 
-            # Calibrate the data
-            y_pred_calibrated = (
-                X[self.floor_area_name].to_numpy() \
-                # Compute calibrated price_sqm in level
-                * np.exp(
-                    # Calibrate this raw prediction
-                    self.calibration_function.predict(
-                        # Start from raw pipeline prediction (log_price_sqm)
-                        np.log(y_pred / X[self.floor_area_name].to_numpy())
+                # Calibrate the predictions
+                y_pred = (
+                    X[self.floor_area_name].to_numpy() \
+                    # Compute calibrated price_sqm in level
+                    * np.exp(
+                        # Calibrate this raw prediction
+                        self.calibration_function.predict(
+                            # Start from raw pipeline prediction (log_price_sqm)
+                            np.log(y_pred / X[self.floor_area_name].to_numpy())
+                        )
                     )
                 )
-            )
 
-            if apply_time_calibration:
-                df_time_calibration = (
-                    X
-                    .select(self.pipe["date_conversion"].date_name)
-                    # join_where does not keep row order, so we need a row number to put
-                    # final predictions in the right order
-                    .with_row_count(name="row_identifier", offset=0)
-                    .with_columns(pl.Series(y_pred_calibrated).alias("y_pred_calibrated"))
-                    .join_where(
-                        self.time_calibration_data,
-                        pl.col(self.pipe["date_conversion"].date_name) >= pl.col("start"),
-                        pl.col(self.pipe["date_conversion"].date_name) < pl.col("end")
+                if apply_time_calibration:
+                    df_time_calibration = (
+                        X
+                        .select(self.pipe["date_conversion"].date_name)
+                        # join_where does not keep row order, so we need a row number to put
+                        # final predictions in the right order
+                        .with_row_count(name="row_identifier", offset=0)
+                        .with_columns(pl.Series(y_pred).alias("y_pred"))
+                        .join_where(
+                            self.time_calibration_data,
+                            pl.col(self.pipe["date_conversion"].date_name) >= pl.col("start"),
+                            pl.col(self.pipe["date_conversion"].date_name) < pl.col("end")
+                        )
+                        .with_columns(y_pred_calibrated=c.y_pred_calibrated * c.ratio)
+                        .sort("row_identifier")
+                        .drop("row_identifier")
                     )
-                    .with_columns(y_pred_calibrated=c.y_pred_calibrated * c.ratio)
-                    .sort("row_identifier")
-                    .drop("row_identifier")
-                )
-                if X.shape[0] != df_time_calibration.shape[0]:
-                    raise ValueError("    There are duplicates in the time calibration step")
-                if df_time_calibration.filter(c.ratio.is_null()).shape[0] > 0:
-                    raise ValueError("    There are missing values in the time calibration step")
-                return df_time_calibration["y_pred_calibrated"].to_numpy()
-            else:
-                return y_pred_calibrated
+                    if X.shape[0] != df_time_calibration.shape[0]:
+                        raise ValueError("    There are duplicates in the time calibration step")
+                    if df_time_calibration.filter(c.ratio.is_null()).shape[0] > 0:
+                        raise ValueError("    There are missing values in the time calibration step")
+                    return df_time_calibration["y_pred_calibrated"].to_numpy()
+                else:
+                    return y_pred
 
-        if self.log_transform:
-            if add_retransformation_correction:
+            if self.log_transform:
                 print("    The models includes a correction of the retransformation bias.") \
                     if verbose else None
                 # Use the Duan's 1983 smearing factor correction
@@ -979,14 +980,15 @@ in training")
 
                 # Apply the correction to the prediction
                 y_pred = y_pred * global_correction
-            else:
-                print("    There is no correction for the retransformation bias.") \
-                    if verbose else None
-        else:
-            print("    The model has no log-transformation.") \
-                if verbose else None
 
-        return y_pred
+                return y_pred
+            else:
+                print("    The model has no log-transformation.") \
+                    if verbose else None
+                return y_pred
+
+        else:
+            return y_pred
 
 
 def predict_market_value(
