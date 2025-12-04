@@ -812,7 +812,7 @@ in training")
         )
 
         if quantile_start > 0 or quantile_end < 1:
-            print(f"Restricting the calibration to the [{quantile_start}; {quantile_end}] range")
+            print(f"    Restricting the calibration to the [{quantile_start}; {quantile_end}] range")
             lower_bound = cal_func.predict(np.quantile(y_pred, [quantile_start])).tolist()[0]
             upper_bound = cal_func.predict(np.quantile(y_pred, [quantile_end])).tolist()[0]
             cal_func = IsotonicRegression(
