@@ -34,6 +34,7 @@ import lightgbm
 from datetime import datetime
 
 import copy
+
 def rotate_point(x, y, angle, center=None):
     """
     Rotate a 2D point counterclockwise by a given angle (in degrees) around a given center.
@@ -539,12 +540,8 @@ but the name of the floor area variable is missing")
         self.presence_coordinates = presence_coordinates
         self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
         self.floor_area_name = floor_area_name
-        self.calibration_function = None
-        self.y_calibration = None
-        self.y_pred_calibration = None
-        self.floor_area_calibration = None
-        self.list_dates_calibration = None
-        self.calibration_data = None
+        self.X_val = None
+        self.y_val = None
 
         print("    Initiating an unfitted price prediction pipeline.")
         self.pipe = create_model_pipeline(
