@@ -996,8 +996,8 @@ but the name of the floor area variable is missing")
 
         X = (
             X
+            .with_columns(predicted_price=pl.Series(y))
             .with_columns(
-                y=pl.Series(y),
                 interval_predicted_price=c.predicted_price.cut(
                     breaks=self.quantile_values,
                     labels=self.quantile_labels
@@ -1008,9 +1008,7 @@ but the name of the floor area variable is missing")
                 on=["interval_predicted_price"] + self.calibration_variables,
                 how="left"
             )
-            .with_columns(
-                y=c.y*c.calibration_ratio
-            )
+            .with_columns(y=c.y*c.calibration_ratio)
         )
 
         return X["y"].to_numpy()
