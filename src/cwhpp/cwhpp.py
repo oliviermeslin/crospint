@@ -740,7 +740,7 @@ but the name of the floor area variable is missing")
 
     def calibrate_model(
         self,
-        X: pl.dataFrame = None,
+        X: pl.DataFrame = None,
         y=None,
         calibration_quantiles: list = None,
         calibration_variables: list = None,
