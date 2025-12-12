@@ -663,28 +663,12 @@ but the name of the floor area variable is missing")
         if X_val is not None and y_val is not None:
             y_pred = self.pipe.predict(X_val)
             y_true = y_val_transformed
-            # We need the prediction in level to build the calibration function
-            # The prediction contains no retransformation correction
-            self.y_pred_calibration = self.inverse_transform(X_val, y_pred)
-            self.y_calibration = y_val
-            self.floor_area_calibration = X_val[self.floor_area_name].to_numpy()
-            if "date_conversion" in [name for name, _ in self.pipe.steps]:
-                self.transaction_date_calibration = X_val[
-                    self.pipe["date_conversion"].date_name
-                ]
             self.source_correction_terms = "Val"
+            self.X_val = X_val
+            self.y_val = y_val
         else:
             y_pred = self.pipe.predict(X)
             y_true = y_transformed
-            # We need the prediction in level to build the calibration function
-            # The prediction contains no retransformation correction
-            self.y_pred_calibration = self.inverse_transform(X, y_pred)
-            self.y_calibration = y
-            self.floor_area_calibration = X[self.floor_area_name].to_numpy()
-            if "date_conversion" in [name for name, _ in self.pipe.steps]:
-                self.transaction_date_calibration = X[
-                    self.pipe["date_conversion"].date_name
-                ]
             self.source_correction_terms = "Train"
 
         if self.log_transform:
