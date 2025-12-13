@@ -728,7 +728,7 @@ but the name of the floor area variable is missing")
             assert isinstance(obj, np.ndarray), "Object is not a numpy array"
             assert obj.ndim == 1, "Array is not 1-dimensional"
 
-    def complete(
+    def complete_df(
         self,
         df: pl.DataFrame,
         columns: list[str]
@@ -905,19 +905,32 @@ but the name of the floor area variable is missing")
         X_cal = X_cal.with_columns(
             calibration_ratio_final=c.predicted_price_cal/c.predicted_price
         )
-        self.X_cal = X_cal
 
-        # Step 4: Building the calibration table
+        self.X_cal = X_cal
+        self.is_calibrated = True
+        self.X_calibration = X_cal
+        self.y_calibration = y
+        self.quantile_values = quantile_values
+        self.quantile_labels = quantile_labels
+        self.table_quantiles_predicted_price = table_quantiles_predicted_price
+        self.calibration_variables = calibration_variables
+
+    def build_calibration_table(
+        self,
+        df,
+        verbose=True
+    ):
+
         print("    Building the calibration table") if verbose else None
 
         calibration_variables_total = (
             ['interval_predicted_price'] +
-            calibration_variables
+            self.calibration_variables
         )
 
         # Build an aggregate calibration table
         calibration_table = (
-            X_cal
+            self.X_cal
             .group_by(calibration_variables_total)
             .agg(
                 total_floor_area=pl.col(self.floor_area_name).sum(),
@@ -932,7 +945,7 @@ but the name of the floor area variable is missing")
         )
 
         # Add all missing combinations of categories
-        calibration_table = self.complete(
+        calibration_table = self.complete_df(
             calibration_table,
             calibration_variables_total
         )
@@ -972,19 +985,12 @@ but the name of the floor area variable is missing")
                 calibration_variables_total + ["calibration_ratio", "calibration_level"]
             )
             .join(
-                table_quantiles_predicted_price,
+                self.table_quantiles_predicted_price,
                 on="interval_predicted_price",
                 how="left"
             )
         )
 
-        self.is_calibrated = True
-        self.X_calibration = X_cal
-        self.y_calibration = y
-        self.quantile_values = quantile_values
-        self.quantile_labels = quantile_labels
-        self.table_quantiles_predicted_price = table_quantiles_predicted_price
-        self.calibration_variables = calibration_variables
         self.calibration_table = calibration_table
 
     def calibrate_prediction(
@@ -1058,6 +1064,10 @@ but the name of the floor area variable is missing")
             if retransformation_method == "calibration":
                 print("    The models includes a calibration step.")
 
+                # Build the calibration table
+                self.build_calibration_table(X, verbose)
+
+                # Calibrate the prediction
                 return self.calibrate_prediction(X, y_pred)
 
             if self.log_transform:
