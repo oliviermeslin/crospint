@@ -871,92 +871,57 @@ but the name of the floor area variable is missing")
             calibration_ratio_final=c.predicted_price_cal/c.predicted_price
         )
 
-        self.X_cal = X_cal
-        self.is_calibrated = True
-        self.X_calibration = X_cal
-        self.y_calibration = y
-        self.quantile_values = quantile_values
-        self.quantile_labels = quantile_labels
-        self.table_quantiles_predicted_price = table_quantiles_predicted_price
+        # Step 3: build the calibration model
+        # A label encoding step for categorical features may be useful for fast inference
+        # self.calibration_model = CalibrationModel()
+        preprocessor = ColumnTransformer(
+            [
+                (
+                    "categorical",
+                    TargetEncoder(
+                        smooth=1.0,
+                        target_type="continuous"
+                    ),
+                    make_column_selector(dtype_include=["object", "category"])
+                )
+            ],
+            remainder="passthrough"
+        )
+        self.calibration_model = Pipeline(
+            steps=[
+                ("pandas_converter", ConvertToPandas()),
+                ("preprocess", preprocessor),
+                (
+                    "model",
+                    lightgbm.LGBMRegressor(
+                        n_estimators=100,
+                        num_leaves=1023,
+                        max_depth=12,
+                        learning_rate=1,
+                        min_child_samples=20,
+                        max_bins=10000,
+                        random_state=123456
+                    )
+                )
+            ]
+        )
+
+        # Train the calibration model
+        # This model is intentionally overfit
+        self.calibration_model.fit(
+            self.X_cal.select(calibration_variables + ["predicted_price"]),
+            self.X_cal["calibration_ratio_final"].to_numpy()
+        )
+
         self.calibration_variables = calibration_variables
-
-    def build_calibration_table(
-        self,
-        df,
-        verbose=True
-    ):
-
-        print("    Building the calibration table") if verbose else None
-
-        calibration_variables_total = (
-            ['interval_predicted_price'] +
-            self.calibration_variables
+        self.X_cal = X_cal.select(
+            calibration_variables + [
+                "predicted_price",
+                "calibration_ratio_final",
+                "predicted_price_cal"
+            ]
         )
-
-        # Build an aggregate calibration table
-        calibration_table = (
-            self.X_cal
-            .group_by(calibration_variables_total)
-            .agg(
-                total_floor_area=pl.col(self.floor_area_name).sum(),
-                nb_transactions=pl.len(),
-                predicted_price=c.predicted_price.sum(),
-                predicted_price_cal=c.predicted_price_cal.sum()
-            )
-            .with_columns(
-                calibration_ratio=(c.predicted_price_cal/c.predicted_price),
-                calibration_level=pl.lit(", ".join(calibration_variables_total))
-            )
-        )
-
-        # Add all missing combinations of categories
-        calibration_table = self.complete_df(
-            calibration_table,
-            calibration_variables_total
-        )
-
-        # Compute calibration ratios for missing combinations of categories
-        for i in range(1, len(calibration_variables_total)):
-            print(calibration_variables_total[0:-i])
-            calibration_table = (
-                calibration_table
-                .with_columns(
-                    calibration_ratio_temp=(
-                        c.predicted_price_cal.sum().over(calibration_variables_total[0:-i]) /
-                        c.predicted_price.sum().over(calibration_variables_total[0:-i])
-                    )
-                )
-                .with_columns(
-                    calibration_ratio=(
-                        pl.when(c.calibration_ratio.is_null(), c.calibration_ratio_temp.is_not_nan())
-                        .then(c.calibration_ratio_temp)
-                        .otherwise(c.calibration_ratio)
-                    )
-                )
-                .with_columns(
-                    calibration_level=(
-                        pl.when(c.calibration_level.is_null(), ~c.calibration_ratio.is_null())
-                        .then(
-                            pl.lit(", ".join(calibration_variables_total[0:-i]))
-                        ).otherwise(c.calibration_level)
-                    )
-                )
-            )
-
-        # Keep only useful variables
-        calibration_table = (
-            calibration_table
-            .select(
-                calibration_variables_total + ["calibration_ratio", "calibration_level"]
-            )
-            .join(
-                self.table_quantiles_predicted_price,
-                on="interval_predicted_price",
-                how="left"
-            )
-        )
-
-        self.calibration_table = calibration_table
+        self.is_calibrated = True
 
     def calibrate_prediction(
         self,
