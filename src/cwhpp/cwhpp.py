@@ -749,7 +749,6 @@ but the name of the floor area variable is missing")
         self,
         X: pl.DataFrame = None,
         y=None,
-        calibration_quantiles: list = None,
         calibration_variables: list = [],
         bounds: tuple = (0.5, 1.5),
         verbose: bool = True
@@ -778,10 +777,6 @@ but the name of the floor area variable is missing")
         if len(missing_vars) > 0:
             raise ValueError("Some variables are missing in the calibration set.")
 
-        calibration_quantiles = sorted(set(calibration_quantiles))
-        assert np.min(calibration_quantiles) > 0, "The lowest quantile must be strictly positive."
-        assert np.max(calibration_quantiles) < 1, "The lowest quantile must be lower than 1."
-
         assert len(bounds) == 2, 'Bounds must be a tuple of length 2'
         lower_bound, upper_bound = bounds
 
@@ -801,44 +796,7 @@ but the name of the floor area variable is missing")
             predicted_price_sqm=c.predicted_price/pl.col(self.floor_area_name)
         )
 
-        # Step 2: Building the prediction quantiles
-        print("    Building the prediction quantiles") if verbose else None
-
-        calibration_quantiles = sorted(set(calibration_quantiles))
-        quantile_labels = [f'0-{calibration_quantiles[0]}'] + [
-            f'{calibration_quantiles[i]}-{calibration_quantiles[i+1]}'
-            for i in range(len(calibration_quantiles)-1)
-        ] + [f'{calibration_quantiles[-1]}-1']
-
-        quantile_values = np.quantile(X_cal["predicted_price"], calibration_quantiles).tolist()
-
-        table_quantiles_predicted_price = pl.DataFrame(
-            {
-                "interval_predicted_price": pl.Series(quantile_labels),
-                "lower_bound_predicted_price": pl.Series([-np.inf] + quantile_values),
-                "upper_bound_predicted_price": pl.Series(quantile_values + [np.inf])
-            }
-        )
-
-        # Add the quantile labels and bounds on the data
-        X_cal = (
-            X_cal
-            .with_row_index(name="row_identifier", offset=0)
-            .with_columns(
-                interval_predicted_price=c.predicted_price.cut(
-                    quantile_values,
-                    labels=quantile_labels
-                ).cast(pl.String)
-            )
-            .join(
-                table_quantiles_predicted_price,
-                on="interval_predicted_price",
-                how="left"
-            )
-            .sort("row_identifier")
-        )
-
-        # Step 3: Performing the calibration
+        # Step 2: Performing the calibration
         print("    Performing the calibration") if verbose else None
 
         # Initialize the calibrated price
@@ -887,8 +845,12 @@ but the name of the floor area variable is missing")
                     X_cal
                     # Compute marginal distributions
                     .with_columns(
-                        total_pred_temp=pl.col('predicted_price_cal').sum().over(calibration_variable),
-                        total_obs_temp=pl.col('target').sum().over(calibration_variable),
+                        total_pred_temp=(
+                            pl.col('predicted_price_cal').sum().over(calibration_variable)
+                        ),
+                        total_obs_temp=(
+                            pl.col('target').sum().over(calibration_variable)
+                        ),
                     )
                     .with_columns(
                         # Update the calibration ratio
@@ -904,7 +866,7 @@ but the name of the floor area variable is missing")
                     )
                 )
         
-        # Compute final calibration
+        # Compute final calibration ratios
         X_cal = X_cal.with_columns(
             calibration_ratio_final=c.predicted_price_cal/c.predicted_price
         )
