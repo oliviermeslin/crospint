@@ -960,9 +960,10 @@ but the name of the floor area variable is missing")
         assert isinstance(add_retransformation_correction, bool), \
             "add_retransformation_correction must be True or False"
 
-        if add_retransformation_correction and retransformation_method not in [None, "Duan", "Miller", "calibration"]:
+        if add_retransformation_correction and \
+                retransformation_method not in [None, "Duan", "Miller", "calibration"]:
             raise ValueError(
-                "The retransformation_method argument must be either None, 'Duan', 'Miller' or 'calibration'."
+                "retransformation_method must be either None, 'Duan', 'Miller' or 'calibration'."
             )
 
         # Check that calibration variables are present in the data
@@ -985,29 +986,32 @@ but the name of the floor area variable is missing")
             and (self.price_sq_meter or self.log_transform) else None
         y_pred = self.inverse_transform(X, y_pred)
 
-        # Correct raw predictions
-        if add_retransformation_correction:
+        # Return raw predictions if no correction is applied
+        if not add_retransformation_correction or retransformation_method is None:
+            print("    No retransformation correction is applied to raw predictions.") \
+                if verbose else None
+            return y_pred
+
+        else:
             # Calibrate predictions if calibration is chosen
             if retransformation_method == "calibration":
-                print("    The models includes a calibration step.")
-
-                # Build the calibration table
-                self.build_calibration_table(X, verbose)
+                print("    Raw predictions are calibrated.")
 
                 # Calibrate the prediction
                 return self.calibrate_prediction(X, y_pred)
 
-            if self.log_transform:
-                print("    The models includes a correction of the retransformation bias.") \
+            # Apply retransformation correction if the model includes log
+            elif self.log_transform:
+                print("    Final predictions include a correction of the retransformation bias.") \
                     if verbose else None
                 # Use the Duan's 1983 smearing factor correction
                 if retransformation_method == "Duan":
-                    print("    The prediction is corrected using Duan's 1983 smearing factor.") \
+                    print("    Raw predictions are corrected using Duan's 1983 smearing factor.") \
                         if verbose else None
                     global_correction = self.smearing_factor
                 # Use the Miller's 1984 retransformation correction
                 elif retransformation_method == "Miller":
-                    print("    The prediction is corrected using Miller's 1984 method.") \
+                    print("    Raw predictions are corrected using Miller's 1984 method.") \
                         if verbose else None
                     global_correction = np.exp((self.RMSE ** 2) / 2)
                 print("    Average correction = ", round(100 * (global_correction - 1), 2), '%')
@@ -1015,9 +1019,6 @@ but the name of the floor area variable is missing")
                 # Apply the correction to the prediction
                 return y_pred * global_correction
             else:
-                print("    The model has no log-transformation.") \
-                    if verbose else None
+                print("    Raw predictions are not corrected because\
+the model has no log-transformation.") if verbose else None
                 return y_pred
-
-        else:
-            return y_pred
