@@ -517,31 +517,17 @@ def create_model_pipeline(
 
 
 def create_calibration_pipeline(
-    model=lightgbm.LGBMRegressor()
+    model=lightgbm.LGBMRegressor(),
 ):
 
-    # A target encoding step for categorical features may be useful for fast inference
-    preprocessor = ColumnTransformer(
-        [
-            (
-                "categorical",
-                TargetEncoder(
-                    smooth=0.1,
-                    target_type="continuous",
-                    random_state=20230516
-                ),
-                make_column_selector(dtype_include=["object", "category"])
-            )
-        ],
-        remainder="passthrough"
-    )
+    steps = [
+        ("validate_features", ValidateFeatures()),
+        ("pandas_converter", ConvertToPandas())
+    ]
+
+    steps.append(("model", model))
     pipe = Pipeline(
-        steps=[
-            ("validate_features", ValidateFeatures()),
-            ("pandas_converter", ConvertToPandas()),
-            ("preprocess", preprocessor),
-            ("model", model)
-        ]
+        steps=steps
     )
     return pipe
 
