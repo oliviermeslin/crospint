@@ -868,7 +868,6 @@ but the name of the floor area variable is missing")
             raise ValueError("Some variables are missing in the calibration set.")
 
         assert len(bounds) == 2, 'Bounds must be a tuple of length 2'
-        lower_bound, upper_bound = bounds
 
         # Step 1: Predicting prices on the calibration set
         print("    Predicting prices on the calibration set") if verbose else None
