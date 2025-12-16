@@ -924,7 +924,9 @@ but the name of the floor area variable is missing")
         )
 
         # Step 3: Train the calibration model
-        self.calibration_model = create_calibration_pipeline()
+        self.calibration_model = create_calibration_pipeline(
+            model=calibration_model
+        )
 
         # Train the model
         # This model is intentionally overfit
@@ -941,6 +943,7 @@ but the name of the floor area variable is missing")
             X_cal
             .select(
                 calibration_variables + [
+                    "target",
                     "predicted_price",
                     "calibration_ratio_final",
                     "predicted_price_cal"
