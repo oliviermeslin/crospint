@@ -891,7 +891,6 @@ but the name of the floor area variable is missing")
         # Initialize the calibrated price
         X_cal = X_cal.with_columns(
             predicted_price_cal=c.predicted_price,
-            predicted_price_sqm_cal=c.predicted_price_sqm,
             calibration_ratio=pl.lit(1)
         )
 
