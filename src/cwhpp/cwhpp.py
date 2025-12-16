@@ -525,8 +525,9 @@ def create_calibration_pipeline(
             (
                 "categorical",
                 TargetEncoder(
-                    smooth=1.0,
-                    target_type="continuous"
+                    smooth=0.1,
+                    target_type="continuous",
+                    random_state=20230516
                 ),
                 make_column_selector(dtype_include=["object", "category"])
             )
