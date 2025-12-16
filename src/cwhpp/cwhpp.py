@@ -901,56 +901,35 @@ but the name of the floor area variable is missing")
             calibration_ratio_final=c.predicted_price_cal/c.predicted_price
         )
 
-        # Step 3: build the calibration model
-        # A label encoding step for categorical features may be useful for fast inference
-        # self.calibration_model = CalibrationModel()
-        preprocessor = ColumnTransformer(
-            [
-                (
-                    "categorical",
-                    TargetEncoder(
-                        smooth=1.0,
-                        target_type="continuous"
-                    ),
-                    make_column_selector(dtype_include=["object", "category"])
-                )
-            ],
-            remainder="passthrough"
-        )
-        self.calibration_model = Pipeline(
-            steps=[
-                ("validate_features", ValidateFeatures()),
-                ("pandas_converter", ConvertToPandas()),
-                ("preprocess", preprocessor),
-                (
-                    "model",
-                    lightgbm.LGBMRegressor(
-                        n_estimators=100,
-                        num_leaves=1023,
-                        max_depth=12,
-                        learning_rate=1,
-                        min_child_samples=20,
-                        max_bins=10000,
-                        random_state=123456
-                    )
-                )
-            ]
-        )
+        # Step 3: Train the calibration model
+        self.calibration_model = create_calibration_pipeline()
 
-        # Train the calibration model
+        # Train the model
         # This model is intentionally overfit
         self.calibration_model.fit(
-            self.X_cal.select(calibration_variables + ["predicted_price"]),
-            self.X_cal["calibration_ratio_final"].to_numpy()
+            X_cal.select(calibration_variables + ["predicted_price"]),
+            X_cal["calibration_ratio_final"].to_numpy()
         )
+        # Predict calibration ratios on the calibration set
+        predicted_ratios = self.calibration_model.predict(X_cal)
 
+        # Add predicted calibration ratios in the calibration set
         self.calibration_variables = calibration_variables
-        self.X_cal = X_cal.select(
-            calibration_variables + [
-                "predicted_price",
-                "calibration_ratio_final",
-                "predicted_price_cal"
-            ]
+        self.X_cal = (
+            X_cal
+            .select(
+                calibration_variables + [
+                    "predicted_price",
+                    "calibration_ratio_final",
+                    "predicted_price_cal"
+                ]
+            )
+            .with_columns(
+                calibration_ratio_final_pred=pl.Series(predicted_ratios)
+            )
+            .with_columns(
+                predicted_price_cal_pred=c.predicted_price*c.calibration_ratio_final_pred
+            )
         )
         self.is_calibrated = True
 
