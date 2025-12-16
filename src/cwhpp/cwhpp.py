@@ -545,7 +545,7 @@ def create_calibration_pipeline(
 
 
 def compute_calibration_ratios(
-    X: pl.dataFrame = None,
+    X: pl.DataFrame = None,
     calibration_variables: list = None,
     perform_distributional_calibration: bool = True,
     raw_prediction_variable="predicted_price",
