@@ -642,7 +642,6 @@ class TwoStepsModel(BaseEstimator):
         price_sq_meter=None,
         presence_coordinates=True,
         presence_date=True,
-        convert_to_pandas_before_fit=True,
         floor_area_name=None
     ):
 
@@ -656,7 +655,6 @@ but the name of the floor area variable is missing")
         self.is_model_fitted = False
         self.presence_coordinates = presence_coordinates
         self.presence_date = presence_date
-        self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
         self.floor_area_name = floor_area_name
         self.X_val = None
         self.y_val = None
