@@ -24,15 +24,18 @@
 import time
 import math
 import numpy as np
+import pandas as pd
 import polars as pl
 from polars import col as c
-import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer, make_column_selector
+from sklearn.preprocessing import TargetEncoder
 from sklearn.isotonic import IsotonicRegression
 from sklearn import metrics
 import lightgbm
 from datetime import datetime
+import copy
 
 
 def rotate_point(x, y, angle, center=None):
@@ -406,16 +409,22 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
 # A custom transformer to convert a polars DataFrame into Pandas
 class ConvertToPandas(BaseEstimator, TransformerMixin):
     """
-    A custom transformer to transform a Polars DataFrame
-    Parameters: None
+    Convert a Polars DataFrame to Pandas while:
+    - converting string columns to categorical in Polars
+    - storing category -> integer mappings at fit time
+    - reapplying the same encoding at transform time
     """
+
     def __init__(self):
         self.feature_names = None
+        self.string_cols = None
+        self.category_mappings = {}
         self.is_fitted = False
 
     def fit(self, X: pl.DataFrame, y=None):
         """
-        Fit the transformer by doing nothing
+        Fit by detecting string columns, converting them to categorical,
+        and storing category -> integer mappings.
 
         Parameters:
         X (pl.DataFrame): Input data.
@@ -424,35 +433,50 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
         Returns:
         self
         """
+        if not isinstance(X, pl.DataFrame):
+            raise TypeError("Input must be a Polars DataFrame")
 
         self.feature_names = X.columns
+        self.category_mappings = {}
+
+        # Detect string columns
+        self.string_cols = [
+            col for col, dtype in zip(X.columns, X.dtypes)
+            if dtype in [pl.Utf8]
+        ]
+
+        # Extract categories
+        for col in self.string_cols:
+
+            # Store the categories of the categorial variable
+            self.category_mappings[col] = sorted(X[col].unique().to_numpy().tolist())
+
         self.is_fitted = True
         return self
 
     def transform(self, X: pl.DataFrame, y=None):
         """
-        Convert to pandas
-
-        Parameters:
-        X (pl.DataFrame): Input data.
-        y (optional): Target values, not used in transformation.
-
-        Returns:
-        pd.DataFrame.
+        Apply stored categorical encodings and convert to Pandas.
         """
-        return X.to_pandas()
+        if not self.is_fitted:
+            raise RuntimeError("Transformer has not been fitted")
+
+        if not isinstance(X, pl.DataFrame):
+            raise TypeError("Input must be a Polars DataFrame")
+
+        df = X.to_pandas()
+
+        # Convert all string variables to categorical with the same encoding
+        for col in self.string_cols:
+            df[col] = pd.Categorical(
+                df[col],
+                categories=self.category_mappings[col]
+            )
+
+        # Convert to pandas (all numeric / safe types now)
+        return df
 
     def fit_transform(self, X: pl.DataFrame, y=None):
-        """
-        Fit and transform the data in one step.
-
-        Parameters:
-        X (pl.DataFrame): Input data.
-        y (optional): Target values, not used in fitting.
-
-        Returns:
-        pd.DataFrame: Same data converted to pandas.
-        """
         self.fit(X, y)
         return self.transform(X, y)
 
@@ -468,8 +492,7 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
 def create_model_pipeline(
     model=lightgbm.LGBMRegressor(),
     presence_coordinates=True,
-    presence_date=True,
-    convert_to_pandas_before_fit: bool = False
+    presence_date=True
 ):
     """
     Create a pipeline for spatio-temporal modelling
@@ -482,6 +505,7 @@ def create_model_pipeline(
     Pipeline: The constructed pipeline.
     """
 
+    # Start by validating the features
     steps = [
         ("validate_features", ValidateFeatures())
     ]
@@ -496,11 +520,10 @@ def create_model_pipeline(
             ("date_conversion", ConvertDateToInteger())
         )
 
-    if convert_to_pandas_before_fit:
-        print("    Adding a step for Pandas conversion at the end of the preprocessing")
-        steps.append(
-            ("pandas_converter", ConvertToPandas())
-        )
+    # Add a conversion to Pandas
+    steps.append(
+        ("pandas_converter", ConvertToPandas())
+    )
 
     # Add the model
     steps.append(
@@ -511,6 +534,100 @@ def create_model_pipeline(
     pipe = Pipeline(steps)
 
     return pipe
+
+
+def create_calibration_pipeline(
+    model=lightgbm.LGBMRegressor()
+):
+
+    steps = [
+        ("validate_features", ValidateFeatures()),
+        ("pandas_converter", ConvertToPandas())
+    ]
+
+    # Add the model
+    steps.append(("model", model))
+    pipe = Pipeline(
+        steps=steps
+    )
+    return pipe
+
+
+def compute_calibration_ratios(
+    X: pl.DataFrame = None,
+    calibration_variables: list = None,
+    perform_distributional_calibration: bool = True,
+    raw_prediction_variable="predicted_price",
+    cal_prediction_variable="predicted_price_cal",
+    target_variable="target",
+    bounds=(0.5, 1.5)
+):
+
+    assert perform_distributional_calibration or calibration_variables is not None, \
+        "At least one form of calibration should be performed"
+
+    lower_bound, upper_bound = bounds
+
+    if perform_distributional_calibration:
+        # Train an isotonic regression mapping the distribution of predicted prices
+        # to the distribution of observed prices
+        cal_func = IsotonicRegression(out_of_bounds="clip")
+        cal_func.fit(
+            np.sort(X[cal_prediction_variable].to_numpy()),
+            np.sort(X[target_variable].to_numpy())
+        )
+
+        # Use the isotonic regression to compute raw calibration ratios
+        calibration_ratio_isotonic = (
+            cal_func.predict(X[cal_prediction_variable].to_numpy())
+            / X[cal_prediction_variable].to_numpy()
+        )
+
+        # Perform distributional calibration
+        X = (
+            X
+            # Update the calibration ratio
+            .with_columns(
+                calibration_ratio=(
+                    (c.calibration_ratio*pl.Series(calibration_ratio_isotonic))
+                    .clip(lower_bound=lower_bound, upper_bound=upper_bound)
+                )
+            )
+            # Adjust raw predictions
+            .with_columns(
+                (pl.col(raw_prediction_variable)*c.calibration_ratio).alias(cal_prediction_variable)
+            )
+        )
+
+    if calibration_variables is not None:
+        # Adjust the predictions to match the marginal distribution of each calibration variable
+        for calibration_variable in calibration_variables:
+            X = (
+                X
+                # Compute marginal distributions
+                .with_columns(
+                    total_pred_temp=(
+                        pl.col(cal_prediction_variable).sum().over(calibration_variable)
+                    ),
+                    total_obs_temp=(
+                        pl.col(target_variable).sum().over(calibration_variable)
+                    ),
+                )
+                .with_columns(
+                    # Update the calibration ratio
+                    calibration_ratio=(
+                        (c.calibration_ratio*(c.total_obs_temp / c.total_pred_temp))
+                        .clip(lower_bound=lower_bound, upper_bound=upper_bound)
+                    )
+                )
+                # Adjust raw predictions
+                .with_columns(
+                    (
+                        pl.col(raw_prediction_variable)*c.calibration_ratio
+                    ).alias(cal_prediction_variable)
+                )
+            )
+    return X
 
 
 class TwoStepsModel(BaseEstimator):
@@ -525,7 +642,6 @@ class TwoStepsModel(BaseEstimator):
         price_sq_meter=None,
         presence_coordinates=True,
         presence_date=True,
-        convert_to_pandas_before_fit=True,
         floor_area_name=None
     ):
 
@@ -538,20 +654,16 @@ but the name of the floor area variable is missing")
         self.feature_names_in = None
         self.is_model_fitted = False
         self.presence_coordinates = presence_coordinates
-        self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
+        self.presence_date = presence_date
         self.floor_area_name = floor_area_name
-        self.calibration_function = None
-        self.y_calibration = None
-        self.y_pred_calibration = None
-        self.floor_area_calibration = None
-        self.list_dates_calibration = None
-        self.calibration_data = None
+        self.X_val = None
+        self.y_val = None
 
         print("    Initiating an unfitted price prediction pipeline.")
         self.pipe = create_model_pipeline(
             model=model,
             presence_coordinates=presence_coordinates,
-            convert_to_pandas_before_fit=convert_to_pandas_before_fit
+            presence_date=presence_date
         )
 
         self.preprocessor = self.pipe[:-1]
@@ -667,28 +779,12 @@ but the name of the floor area variable is missing")
         if X_val is not None and y_val is not None:
             y_pred = self.pipe.predict(X_val)
             y_true = y_val_transformed
-            # We need the prediction in level to build the calibration function
-            # The prediction contains no retransformation correction
-            self.y_pred_calibration = self.inverse_transform(X_val, y_pred)
-            self.y_calibration = y_val
-            self.floor_area_calibration = X_val[self.floor_area_name].to_numpy()
-            if "date_conversion" in [name for name, _ in self.pipe.steps]:
-                self.transaction_date_calibration = X_val[
-                    self.pipe["date_conversion"].date_name
-                ]
             self.source_correction_terms = "Val"
+            self.X_val = X_val
+            self.y_val = y_val
         else:
             y_pred = self.pipe.predict(X)
             y_true = y_transformed
-            # We need the prediction in level to build the calibration function
-            # The prediction contains no retransformation correction
-            self.y_pred_calibration = self.inverse_transform(X, y_pred)
-            self.y_calibration = y
-            self.floor_area_calibration = X[self.floor_area_name].to_numpy()
-            if "date_conversion" in [name for name, _ in self.pipe.steps]:
-                self.transaction_date_calibration = X[
-                    self.pipe["date_conversion"].date_name
-                ]
             self.source_correction_terms = "Train"
 
         if self.log_transform:
@@ -751,115 +847,148 @@ but the name of the floor area variable is missing")
 
     def calibrate_model(
         self,
+        X: pl.DataFrame = None,
         y=None,
-        y_pred=None,
-        floor_area=None,
-        quantile_start: float = 0,
-        quantile_end: float = 1
+        calibration_variables: list = [],
+        calibration_model=lightgbm.LGBMRegressor(
+            n_estimators=100,
+            num_leaves=1023,
+            max_depth=12,
+            learning_rate=0.5,
+            min_child_samples=20,
+            max_bins=10000,
+            random_state=123456
+        ),
+        bounds: tuple = (0.5, 1.5),
+        verbose: bool = True
     ):
+
+        assert self.is_model_fitted, "The model must be trained before being calibrated"
+
+        if (X is None or y is None):
+            if self.X_val is not None and self.y_val is not None:
+                print("    Using the validation dataset as calibration set.") if verbose else None
+                X = copy.deepcopy(self.X_val)
+                y = copy.deepcopy(self.y_val)
+        else:
+            raise ValueError("    Calibration data is missing.")
 
         self.assert_is_1d_array(y)
-        self.assert_is_1d_array(y_pred)
-        self.assert_is_1d_array(floor_area)
-        if y is None or y_pred is None or floor_area is None:
-            print(f"Calibrating the model using {self.source_correction_terms} data used \
-in training")
-            y = self.y_calibration
-            y_pred = self.y_pred_calibration
-            floor_area = self.floor_area_calibration
+        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
+        assert X.shape[0] == len(y), "y and X must have the same length"
+        assert isinstance(calibration_variables, list), "calibration_variables must be a list"
 
-        self.list_dates_calibration = None
-        self.calibration_data = None
+        # Check that X contains all necessary data
+        missing_vars = []
+        for var in calibration_variables + self.model_features:
+            if var not in X.columns:
+                missing_vars.extend(var)
+                print(f"Variable {var} is missing in the calibration set.")
+        if len(missing_vars) > 0:
+            raise ValueError("Some variables are missing in the calibration set.")
 
-        # Prepare data for calibration
-        y = np.log(y / floor_area)
-        y_pred = np.log(y_pred / floor_area)
+        assert len(bounds) == 2, 'Bounds must be a tuple of length 2'
 
-        # Fit the calibration function on the whole distribution
-        cal_func = IsotonicRegression(out_of_bounds="clip")
-        cal_func.fit(
-            np.sort(y_pred),
-            np.sort(y)
+        # Step 1: Predicting prices on the calibration set
+        print("    Predicting prices on the calibration set") if verbose else None
+        raw_predictions = self.predict(
+            X,
+            add_retransformation_correction=False,
+            retransformation_method=None,
+            verbose=False
+        )
+        # Add the prediction to the calibration set
+        X_cal = X.with_columns(
+            predicted_price=pl.Series(raw_predictions),
+            target=pl.Series(y)
+        ).with_columns(
+            predicted_price_sqm=c.predicted_price/pl.col(self.floor_area_name)
         )
 
-        if quantile_start > 0 or quantile_end < 1:
-            print(f"    Restricting the calibration to the [{quantile_start}; {quantile_end}] range")
-            lower_bound = cal_func.predict(np.quantile(y_pred, [quantile_start])).tolist()[0]
-            upper_bound = cal_func.predict(np.quantile(y_pred, [quantile_end])).tolist()[0]
-            cal_func = IsotonicRegression(
-                out_of_bounds="clip",
-                y_min=lower_bound,
-                y_max=upper_bound
-            )
-            cal_func.fit(
-                np.sort(y_pred),
-                np.sort(y)
-            )
+        # Step 2: Performing the calibration
+        print("    Performing the calibration") if verbose else None
 
-        self.calibration_function = cal_func
-
-        # Store calibration data
-        self.y_pred_calibrated = self.floor_area_calibration \
-            * np.exp(
-                self.calibration_function.predict(
-                    np.log(self.y_pred_calibration / self.floor_area_calibration)
-                )
-            )
-
-        self.calibration_data = pl.DataFrame(
-            {
-                "y": self.y_calibration,
-                "y_pred_calibration": self.y_pred_calibration,
-                "y_pred_calibrated": self.y_pred_calibrated,
-                "transaction_date": self.transaction_date_calibration
-            }
+        # Initialize the calibrated price
+        X_cal = X_cal.with_columns(
+            predicted_price_cal=c.predicted_price,
+            calibration_ratio=pl.lit(1)
         )
 
-    def perform_time_calibration(
+        # Perform the iterative calibration
+        # Here we could improve the code to use convergence criteria
+        for i in range(20):
+            X_cal = compute_calibration_ratios(
+                X=X_cal,
+                calibration_variables=calibration_variables,
+                raw_prediction_variable="predicted_price",
+                cal_prediction_variable="predicted_price_cal",
+                target_variable="target",
+                bounds=bounds
+            )
+
+        # Compute final calibration ratios
+        X_cal = X_cal.with_columns(
+            calibration_ratio_final=c.predicted_price_cal/c.predicted_price
+        )
+
+        # Step 3: Train the calibration model
+        print("    Training the calibration model") if verbose else None
+        self.calibration_model = create_calibration_pipeline(
+            model=calibration_model
+        )
+
+        # Train the model
+        # This model is intentionally overfit
+        self.calibration_model.fit(
+            X_cal.select(calibration_variables + ["predicted_price"]),
+            X_cal["calibration_ratio_final"].to_numpy()
+        )
+        # Predict calibration ratios on the calibration set
+        predicted_ratios = self.calibration_model.predict(X_cal)
+
+        # Add predicted calibration ratios in the calibration set
+        self.calibration_variables = calibration_variables
+        self.X_cal = (
+            X_cal
+            .select(
+                calibration_variables + [
+                    "target",
+                    "predicted_price",
+                    "calibration_ratio_final",
+                    "predicted_price_cal"
+                ]
+            )
+            .with_columns(
+                calibration_ratio_final_pred=pl.Series(predicted_ratios)
+            )
+            .with_columns(
+                predicted_price_cal_pred=c.predicted_price*c.calibration_ratio_final_pred
+            )
+        )
+        self.is_calibrated = True
+
+    def calibrate_prediction(
         self,
-        list_dates_calibration: list = None
+        X,
+        y
     ):
-        if self.calibration_data is None:
-            raise ValueError("The model must be calibrated before performing time calibration")
-        if list_dates_calibration is None:
-            raise ValueError("list_dates_calibration cannot be None")
 
-        self.list_dates_calibration = np.unique(list_dates_calibration).tolist()
-
-        df_time_intervals = (
-            pl.DataFrame({"start": [None] + self.list_dates_calibration})
-            .with_columns(
-                c.start.str.strptime(pl.Date, format="%Y-%m-%d")
-                .fill_null(pl.Series(["0001-01-01"]).str.strptime(pl.Date, format="%Y-%m-%d"))
-            )
-            .sort("start")
-            .with_columns(
-                end=c.start.shift(-1)
-                .fill_null(pl.Series(["3000-01-01"]).str.strptime(pl.Date, format="%Y-%m-%d"))
+        # Add the predictions to the dataframe
+        X = (
+            X
+            .with_columns(predicted_price=pl.Series(y))
+            .select(
+                self.calibration_variables + ["predicted_price"]
             )
         )
 
-        calibration_data_ranges = (
-            self.calibration_data
-            .join_where(
-                df_time_intervals,
-                pl.col("transaction_date") >= pl.col("start"),
-                pl.col("transaction_date") < pl.col("end")
-            )
-        )
+        # Predict calibration ratios
+        predicted_calibration_ratios = self.calibration_model.predict(X)
 
-        self.time_calibration_data = (
-            calibration_data_ranges
-            .group_by("start", "end")
-            .agg(
-                total_obs=c.y.sum(),
-                total_pred=c.y_pred_calibrated.sum()
-            )
-            .with_columns(
-                ratio=c.total_obs/c.total_pred
-            )
-            .sort("start")
-        )
+        # Compute calibrated predictions by applying calibration ratios
+        y_calibrated = y * predicted_calibration_ratios
+
+        return y_calibrated
 
     def predict(
         self,
@@ -867,7 +996,6 @@ in training")
         iteration_range=None,
         add_retransformation_correction: bool = False,
         retransformation_method: str = None,
-        apply_time_calibration: bool = False,
         verbose: bool = True,
         **kwargs
     ):
@@ -876,12 +1004,24 @@ in training")
         assert isinstance(add_retransformation_correction, bool), \
             "add_retransformation_correction must be True or False"
 
-        if add_retransformation_correction and retransformation_method not in [None, "Duan", "Miller", "calibration"]:
+        if add_retransformation_correction and \
+                retransformation_method not in [None, "Duan", "Miller", "calibration"]:
             raise ValueError(
-                "The retransformation_method argument must be either None, 'Duan', 'Miller' or 'calibration'."
+                "retransformation_method must be either None, 'Duan', 'Miller' or 'calibration'."
             )
 
-        # Predict the local average
+        # Check that calibration variables are present in the data
+        if retransformation_method == "calibration":
+            assert self.is_calibrated, "The model is not calibrated"
+            missing_calvar = []
+            for var in self.calibration_variables:
+                if var not in X.columns:
+                    missing_calvar.extend(var)
+                    print(f"Variable {var} is missing in the calibration set.")
+            if len(missing_calvar) > 0:
+                raise ValueError("Some calibration variables are missing in the data.")
+
+        # Predict the price
         print("    Predicting the target") if verbose else None
         y_pred = self.pipe.predict(X)
 
@@ -890,73 +1030,39 @@ in training")
             and (self.price_sq_meter or self.log_transform) else None
         y_pred = self.inverse_transform(X, y_pred)
 
-        # Correct raw predictions
-        if add_retransformation_correction:
+        # Return raw predictions if no correction is applied
+        if not add_retransformation_correction or retransformation_method is None:
+            print("    No retransformation correction is applied to raw predictions.") \
+                if verbose else None
+            return y_pred
+
+        else:
             # Calibrate predictions if calibration is chosen
             if retransformation_method == "calibration":
-                print("    The models includes a calibration step.")
+                print("    Raw predictions are calibrated.")
 
-                # Calibrate the predictions
-                y_pred = (
-                    X[self.floor_area_name].to_numpy() \
-                    # Compute calibrated price_sqm in level
-                    * np.exp(
-                        # Calibrate this raw prediction
-                        self.calibration_function.predict(
-                            # Start from raw pipeline prediction (log_price_sqm)
-                            np.log(y_pred / X[self.floor_area_name].to_numpy())
-                        )
-                    )
-                )
+                # Calibrate the prediction
+                return self.calibrate_prediction(X, y_pred)
 
-                if apply_time_calibration:
-                    df_time_calibration = (
-                        X
-                        .select(self.pipe["date_conversion"].date_name)
-                        # join_where does not keep row order, so we need a row number to put
-                        # final predictions in the right order
-                        .with_row_count(name="row_identifier", offset=0)
-                        .with_columns(pl.Series(y_pred).alias("y_pred"))
-                        .join_where(
-                            self.time_calibration_data,
-                            pl.col(self.pipe["date_conversion"].date_name) >= pl.col("start"),
-                            pl.col(self.pipe["date_conversion"].date_name) < pl.col("end")
-                        )
-                        .with_columns(y_pred_calibrated=c.y_pred_calibrated * c.ratio)
-                        .sort("row_identifier")
-                        .drop("row_identifier")
-                    )
-                    if X.shape[0] != df_time_calibration.shape[0]:
-                        raise ValueError("    There are duplicates in the time calibration step")
-                    if df_time_calibration.filter(c.ratio.is_null()).shape[0] > 0:
-                        raise ValueError("    There are missing values in the time calibration step")
-                    return df_time_calibration["y_pred_calibrated"].to_numpy()
-                else:
-                    return y_pred
-
-            if self.log_transform:
-                print("    The models includes a correction of the retransformation bias.") \
+            # Apply retransformation correction if the model includes log
+            elif self.log_transform:
+                print("    Final predictions include a correction of the retransformation bias.") \
                     if verbose else None
                 # Use the Duan's 1983 smearing factor correction
                 if retransformation_method == "Duan":
-                    print("    The prediction is corrected using Duan's 1983 smearing factor.") \
+                    print("    Raw predictions are corrected using Duan's 1983 smearing factor.") \
                         if verbose else None
                     global_correction = self.smearing_factor
                 # Use the Miller's 1984 retransformation correction
                 elif retransformation_method == "Miller":
-                    print("    The prediction is corrected using Miller's 1984 method.") \
+                    print("    Raw predictions are corrected using Miller's 1984 method.") \
                         if verbose else None
                     global_correction = np.exp((self.RMSE ** 2) / 2)
                 print("    Average correction = ", round(100 * (global_correction - 1), 2), '%')
 
                 # Apply the correction to the prediction
-                y_pred = y_pred * global_correction
-
-                return y_pred
+                return y_pred * global_correction
             else:
-                print("    The model has no log-transformation.") \
-                    if verbose else None
+                print("    Raw predictions are not corrected because\
+the model has no log-transformation.") if verbose else None
                 return y_pred
-
-        else:
-            return y_pred

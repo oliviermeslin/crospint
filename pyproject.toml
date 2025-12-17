@@ -1,6 +1,6 @@
 [project]
 name = "cwhpp"
-version = "0.3.16"
+version = "0.4.1"
 description = "Country Wide Housing Prices Predictions"
 readme = "README.md"
 requires-python = ">=3.12"
