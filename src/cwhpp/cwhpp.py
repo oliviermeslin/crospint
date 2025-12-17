@@ -409,16 +409,22 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
 # A custom transformer to convert a polars DataFrame into Pandas
 class ConvertToPandas(BaseEstimator, TransformerMixin):
     """
-    A custom transformer to transform a Polars DataFrame
-    Parameters: None
+    Convert a Polars DataFrame to Pandas while:
+    - converting string columns to categorical in Polars
+    - storing category -> integer mappings at fit time
+    - reapplying the same encoding at transform time
     """
+
     def __init__(self):
         self.feature_names = None
+        self.string_cols = None
+        self.category_mappings = {}
         self.is_fitted = False
 
     def fit(self, X: pl.DataFrame, y=None):
         """
-        Fit the transformer by doing nothing
+        Fit by detecting string columns, converting them to categorical,
+        and storing category -> integer mappings.
 
         Parameters:
         X (pl.DataFrame): Input data.
