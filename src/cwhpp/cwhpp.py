@@ -486,8 +486,7 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
 def create_model_pipeline(
     model=lightgbm.LGBMRegressor(),
     presence_coordinates=True,
-    presence_date=True,
-    convert_to_pandas_before_fit: bool = False
+    presence_date=True
 ):
     """
     Create a pipeline for spatio-temporal modelling
@@ -500,6 +499,7 @@ def create_model_pipeline(
     Pipeline: The constructed pipeline.
     """
 
+    # Start by validating the features
     steps = [
         ("validate_features", ValidateFeatures())
     ]
@@ -514,11 +514,10 @@ def create_model_pipeline(
             ("date_conversion", ConvertDateToInteger())
         )
 
-    if convert_to_pandas_before_fit:
-        print("    Adding a step for Pandas conversion at the end of the preprocessing")
-        steps.append(
-            ("pandas_converter", ConvertToPandas())
-        )
+    # Add a conversion to Pandas
+    steps.append(
+        ("pandas_converter", ConvertToPandas())
+    )
 
     # Add the model
     steps.append(
