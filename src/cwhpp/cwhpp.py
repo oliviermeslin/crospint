@@ -427,6 +427,8 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
         Returns:
         self
         """
+        if not isinstance(X, pl.DataFrame):
+            raise TypeError("Input must be a Polars DataFrame")
 
         self.feature_names = X.columns
         self.is_fitted = True
