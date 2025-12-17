@@ -431,33 +431,46 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
             raise TypeError("Input must be a Polars DataFrame")
 
         self.feature_names = X.columns
+        self.category_mappings = {}
+
+        # Detect string columns
+        self.string_cols = [
+            col for col, dtype in zip(X.columns, X.dtypes)
+            if dtype in [pl.Utf8]
+        ]
+
+        # Extract categories
+        for col in self.string_cols:
+
+            # Store the categories of the categorial variable
+            self.category_mappings[col] = sorted(X[col].unique().to_numpy().tolist())
+
         self.is_fitted = True
         return self
 
     def transform(self, X: pl.DataFrame, y=None):
         """
-        Convert to pandas
-
-        Parameters:
-        X (pl.DataFrame): Input data.
-        y (optional): Target values, not used in transformation.
-
-        Returns:
-        pd.DataFrame.
+        Apply stored categorical encodings and convert to Pandas.
         """
-        return X.to_pandas()
+        if not self.is_fitted:
+            raise RuntimeError("Transformer has not been fitted")
+
+        if not isinstance(X, pl.DataFrame):
+            raise TypeError("Input must be a Polars DataFrame")
+
+        df = X.to_pandas()
+
+        # Convert all string variables to categorical with the same encoding
+        for col in self.string_cols:
+            df[col] = pd.Categorical(
+                df[col],
+                categories=self.category_mappings[col]
+            )
+
+        # Convert to pandas (all numeric / safe types now)
+        return df
 
     def fit_transform(self, X: pl.DataFrame, y=None):
-        """
-        Fit and transform the data in one step.
-
-        Parameters:
-        X (pl.DataFrame): Input data.
-        y (optional): Target values, not used in fitting.
-
-        Returns:
-        pd.DataFrame: Same data converted to pandas.
-        """
         self.fit(X, y)
         return self.transform(X, y)
 
