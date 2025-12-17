@@ -654,6 +654,7 @@ but the name of the floor area variable is missing")
         self.feature_names_in = None
         self.is_model_fitted = False
         self.presence_coordinates = presence_coordinates
+        self.presence_date = presence_date
         self.convert_to_pandas_before_fit = convert_to_pandas_before_fit
         self.floor_area_name = floor_area_name
         self.X_val = None
@@ -663,7 +664,7 @@ but the name of the floor area variable is missing")
         self.pipe = create_model_pipeline(
             model=model,
             presence_coordinates=presence_coordinates,
-            convert_to_pandas_before_fit=convert_to_pandas_before_fit
+            presence_date=presence_date
         )
 
         self.preprocessor = self.pipe[:-1]
