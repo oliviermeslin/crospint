@@ -849,7 +849,10 @@ but the name of the floor area variable is missing")
         self,
         X: pl.DataFrame = None,
         y=None,
-        calibration_variables: list = [],
+        calibration_variables: list = None,
+        perform_distributional_calibration: bool = True,
+        convergence_rate: float = 1e5,
+        max_iter: int = 100,
         calibration_model=lightgbm.LGBMRegressor(
             n_estimators=100,
             num_leaves=1023,
@@ -876,7 +879,10 @@ but the name of the floor area variable is missing")
         self.assert_is_1d_array(y)
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
         assert X.shape[0] == len(y), "y and X must have the same length"
-        assert isinstance(calibration_variables, list), "calibration_variables must be a list"
+        assert isinstance(calibration_variables, list) or calibration_variables is None, \
+            "calibration_variables must be a list"
+        assert calibration_variables is not None or perform_distributional_calibration, \
+            "calibration_variables cannot be None if there is no distributional calibration"
 
         # Check that X contains all necessary data
         missing_vars = []
@@ -914,17 +920,57 @@ but the name of the floor area variable is missing")
             calibration_ratio=pl.lit(1)
         )
 
+        if calibration_variables is None:
+            print("    There are no calibration variables. \
+Only distributional calibration will be performed.") if verbose else None
+
+        if perform_distributional_calibration is False:
+            print("    There is no distributional calibration. \
+Only marginal calibration will be performed.") if verbose else None
+
         # Perform the iterative calibration
-        # Here we could improve the code to use convergence criteria
-        for i in range(20):
+        nb_iter = 0
+        max_conv = 10 * convergence_rate
+        while max_conv < convergence_rate:
+
+            if nb_iter >= max_iter:
+                raise RuntimeError("Algorithm failed to converge after {max_iter} iterations. \
+You may try again with looser bounds, higher convergence thresholds or less calibration variables.")
+
             X_cal = compute_calibration_ratios(
                 X=X_cal,
                 calibration_variables=calibration_variables,
+                perform_distributional_calibration=perform_distributional_calibration,
                 raw_prediction_variable="predicted_price",
                 cal_prediction_variable="predicted_price_cal",
                 target_variable="target",
                 bounds=bounds
             )
+
+            # Check if convergence has been reached
+            if calibration_variables is not None:
+
+                max_conv = 0
+                for var in calibration_variables:
+                    temp = (
+                        X_cal
+                        .group_by(var)
+                        .agg(
+                            nb=pl.len(),
+                            ratio=(c.predicted_price_cal.sum()/c.target.sum()-1).abs()
+                        )
+                        # Remove very small categories
+                        .filter(c.nb/c.nb.sum() > 0.01)
+                        .select(c.ratio.max())
+                        .item()
+                    )
+                    if temp > max_conv:
+                        max_conv = temp
+
+            nb_iter += 1
+
+        print(f"    The calibration procedure converged after {nb_iter} iterations") \
+            if verbose else None
 
         # Compute final calibration ratios
         X_cal = X_cal.with_columns(
