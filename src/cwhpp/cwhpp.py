@@ -851,7 +851,7 @@ but the name of the floor area variable is missing")
         y=None,
         calibration_variables: list = None,
         perform_distributional_calibration: bool = True,
-        convergence_rate: float = 1e5,
+        convergence_rate: float = 1e-3,
         max_iter: int = 100,
         calibration_model=lightgbm.LGBMRegressor(
             n_estimators=100,
@@ -931,10 +931,10 @@ Only marginal calibration will be performed.") if verbose else None
         # Perform the iterative calibration
         nb_iter = 0
         max_conv = 10 * convergence_rate
-        while max_conv < convergence_rate:
-
+        while max_conv > convergence_rate:
+            print(nb_iter)
             if nb_iter >= max_iter:
-                raise RuntimeError("Algorithm failed to converge after {max_iter} iterations. \
+                raise RuntimeError(f"    Algorithm failed to converge after {max_iter} iterations. \
 You may try again with looser bounds, higher convergence thresholds or less calibration variables.")
 
             X_cal = compute_calibration_ratios(
@@ -952,7 +952,7 @@ You may try again with looser bounds, higher convergence thresholds or less cali
 
                 max_conv = 0
                 for var in calibration_variables:
-                    temp = (
+                    largest_gap = (
                         X_cal
                         .group_by(var)
                         .agg(
@@ -964,9 +964,9 @@ You may try again with looser bounds, higher convergence thresholds or less cali
                         .select(c.ratio.max())
                         .item()
                     )
-                    if temp > max_conv:
-                        max_conv = temp
-
+                    if largest_gap > max_conv:
+                        max_conv = largest_gap
+                print(f"    max_conv = {max_conv}") if verbose else None
             nb_iter += 1
 
         print(f"    The calibration procedure converged after {nb_iter} iterations") \
