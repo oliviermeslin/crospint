@@ -932,7 +932,6 @@ Only marginal calibration will be performed.") if verbose else None
         nb_iter = 0
         max_conv = 10 * convergence_rate
         while max_conv > convergence_rate:
-            print(nb_iter)
             if nb_iter >= max_iter:
                 raise RuntimeError(f"    Algorithm failed to converge after {max_iter} iterations. \
 You may try again with looser bounds, higher convergence thresholds or less calibration variables.")
@@ -966,11 +965,11 @@ You may try again with looser bounds, higher convergence thresholds or less cali
                     )
                     if largest_gap > max_conv:
                         max_conv = largest_gap
-                print(f"    max_conv = {max_conv}") if verbose else None
             nb_iter += 1
 
         print(f"    The calibration procedure converged after {nb_iter} iterations") \
             if verbose else None
+        print(f"    max_conv = {max_conv}") if verbose else None
 
         # Compute final calibration ratios
         X_cal = X_cal.with_columns(
