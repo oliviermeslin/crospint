@@ -640,6 +640,36 @@ def compute_calibration_ratios(
     return X
 
 
+# Define a custom early stopping callback based on r2
+def stop_on_train_r2(threshold=None):
+    def _callback(env):
+        # Find training dataset
+        for data_name, eval_name, value, _ in env.evaluation_result_list:
+            if data_name == "Train" and eval_name == "r2":
+                if value >= threshold:
+                    print(
+                            f"[Early stopping] "
+                            f"Iteration {env.iteration + 1}, "
+                            f"training {eval_name} = {value:.6f} "
+                            f"(threshold = {threshold})"
+                        )
+                    raise EarlyStopException(
+                        best_iteration=env.iteration,
+                        best_score=env.evaluation_result_list
+                    )
+    return _callback
+
+
+# Define a custom evaluation metric
+def r2_eval(preds, dataset):
+    if isinstance(dataset, lightgbm.Dataset):
+        y_true = dataset.get_label()
+    else:
+        # sklearn API
+        y_true = dataset
+    return "r2", r2_score(y_true, preds), True
+
+
 class TwoStepsModel(BaseEstimator):
     """
     A custom estimator that combines two steps: transformation of the target
