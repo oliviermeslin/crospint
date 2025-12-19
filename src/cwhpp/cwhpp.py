@@ -892,6 +892,7 @@ but the name of the floor area variable is missing")
         calibration_variables: list = None,
         perform_distributional_calibration: bool = True,
         convergence_rate: float = 1e-3,
+        bounds: tuple = (0.5, 1.5),
         max_iter: int = 100,
         calibration_model=lightgbm.LGBMRegressor(
             n_estimators=100,
@@ -900,7 +901,8 @@ but the name of the floor area variable is missing")
             learning_rate=0.5,
             min_child_samples=20,
             max_bins=10000,
-            random_state=123456
+            random_state=123456,
+            verbose=-1
         ),
         bounds: tuple = (0.5, 1.5),
         verbose: bool = True
