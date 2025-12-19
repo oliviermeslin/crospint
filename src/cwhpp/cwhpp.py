@@ -641,7 +641,7 @@ def compute_calibration_ratios(
 
 
 # Define a custom early stopping callback based on r2
-def stop_on_train_r2(threshold=None):
+def stop_on_train_r2(threshold=None, verbose=False):
     def _callback(env):
         # Find training dataset
         for data_name, eval_name, value, _ in env.evaluation_result_list:
@@ -652,7 +652,7 @@ def stop_on_train_r2(threshold=None):
                             f"Iteration {env.iteration + 1}, "
                             f"training {eval_name} = {value:.6f} "
                             f"(threshold = {threshold})"
-                        )
+                        ) if verbose else None
                     raise EarlyStopException(
                         best_iteration=env.iteration,
                         best_score=env.evaluation_result_list
