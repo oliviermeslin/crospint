@@ -23,19 +23,19 @@
 
 import time
 import math
+from datetime import datetime
+import copy
 import numpy as np
 import pandas as pd
 import polars as pl
 from polars import col as c
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer, make_column_selector
-from sklearn.preprocessing import TargetEncoder
 from sklearn.isotonic import IsotonicRegression
+from sklearn.metrics import r2_score
 from sklearn import metrics
 import lightgbm
-from datetime import datetime
-import copy
+from lightgbm.callback import EarlyStopException
 
 
 def rotate_point(x, y, angle, center=None):
@@ -445,11 +445,15 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
             if dtype in [pl.Utf8]
         ]
 
-        # Extract categories
-        for col in self.string_cols:
-
-            # Store the categories of the categorial variable
-            self.category_mappings[col] = sorted(X[col].unique().to_numpy().tolist())
+        if len(self.string_cols) > 0:
+            # Extract categories
+            for col in self.string_cols:
+                # Replace null values with a non-null value
+                X = (
+                    X
+                    .with_columns(pl.col(col).fill_null("missing").alias(col))
+                )
+                self.category_mappings[col] = sorted(X[col].unique().to_numpy().tolist())
 
         self.is_fitted = True
         return self
@@ -464,8 +468,14 @@ class ConvertToPandas(BaseEstimator, TransformerMixin):
         if not isinstance(X, pl.DataFrame):
             raise TypeError("Input must be a Polars DataFrame")
 
-        df = X.to_pandas()
+        for col in self.string_cols:
+            # Replace null values in categorical features with a non-null value
+            X = (
+                    X
+                    .with_columns(pl.col(col).fill_null("missing").alias(col))
+                )
 
+        df = X.to_pandas()
         # Convert all string variables to categorical with the same encoding
         for col in self.string_cols:
             df[col] = pd.Categorical(
@@ -628,6 +638,36 @@ def compute_calibration_ratios(
                 )
             )
     return X
+
+
+# Define a custom early stopping callback based on r2
+def stop_on_train_r2(threshold=None, verbose=False):
+    def _callback(env):
+        # Find training dataset
+        for data_name, eval_name, value, _ in env.evaluation_result_list:
+            if data_name == "Train" and eval_name == "r2":
+                if value >= threshold:
+                    print(
+                            f"[Early stopping] "
+                            f"Iteration {env.iteration + 1}, "
+                            f"training {eval_name} = {value:.6f} "
+                            f"(threshold = {threshold})"
+                        ) if verbose else None
+                    raise EarlyStopException(
+                        best_iteration=env.iteration,
+                        best_score=env.evaluation_result_list
+                    )
+    return _callback
+
+
+# Define a custom evaluation metric
+def r2_eval(preds, dataset):
+    if isinstance(dataset, lightgbm.Dataset):
+        y_true = dataset.get_label()
+    else:
+        # sklearn API
+        y_true = dataset
+    return "r2", r2_score(y_true, preds), True
 
 
 class TwoStepsModel(BaseEstimator):
@@ -849,7 +889,11 @@ but the name of the floor area variable is missing")
         self,
         X: pl.DataFrame = None,
         y=None,
-        calibration_variables: list = [],
+        calibration_variables: list = None,
+        perform_distributional_calibration: bool = True,
+        convergence_rate: float = 1e-3,
+        bounds: tuple = (0.5, 1.5),
+        max_iter: int = 100,
         calibration_model=lightgbm.LGBMRegressor(
             n_estimators=100,
             num_leaves=1023,
@@ -857,9 +901,10 @@ but the name of the floor area variable is missing")
             learning_rate=0.5,
             min_child_samples=20,
             max_bins=10000,
-            random_state=123456
+            random_state=123456,
+            verbose=-1
         ),
-        bounds: tuple = (0.5, 1.5),
+        r2_threshold=1.0,
         verbose: bool = True
     ):
 
@@ -876,7 +921,10 @@ but the name of the floor area variable is missing")
         self.assert_is_1d_array(y)
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
         assert X.shape[0] == len(y), "y and X must have the same length"
-        assert isinstance(calibration_variables, list), "calibration_variables must be a list"
+        assert isinstance(calibration_variables, list) or calibration_variables is None, \
+            "calibration_variables must be a list"
+        assert calibration_variables is not None or perform_distributional_calibration, \
+            "calibration_variables cannot be None if there is no distributional calibration"
 
         # Check that X contains all necessary data
         missing_vars = []
@@ -914,17 +962,56 @@ but the name of the floor area variable is missing")
             calibration_ratio=pl.lit(1)
         )
 
+        if calibration_variables is None:
+            print("    There are no calibration variables. \
+Only distributional calibration will be performed.") if verbose else None
+
+        if perform_distributional_calibration is False:
+            print("    There is no distributional calibration. \
+Only marginal calibration will be performed.") if verbose else None
+
         # Perform the iterative calibration
-        # Here we could improve the code to use convergence criteria
-        for i in range(20):
+        nb_iter = 0
+        max_conv = 10 * convergence_rate
+        while max_conv > convergence_rate:
+            if nb_iter >= max_iter:
+                raise RuntimeError(f"    Algorithm failed to converge after {max_iter} iterations. \
+You may try again with looser bounds, higher convergence thresholds or less calibration variables.")
+
             X_cal = compute_calibration_ratios(
                 X=X_cal,
                 calibration_variables=calibration_variables,
+                perform_distributional_calibration=perform_distributional_calibration,
                 raw_prediction_variable="predicted_price",
                 cal_prediction_variable="predicted_price_cal",
                 target_variable="target",
                 bounds=bounds
             )
+
+            # Check if convergence has been reached
+            if calibration_variables is not None:
+
+                max_conv = 0
+                for var in calibration_variables:
+                    largest_gap = (
+                        X_cal
+                        .group_by(var)
+                        .agg(
+                            nb=pl.len(),
+                            ratio=(c.predicted_price_cal.sum()/c.target.sum()-1).abs()
+                        )
+                        # Remove very small categories
+                        .filter(c.nb/c.nb.sum() > 0.01)
+                        .select(c.ratio.max())
+                        .item()
+                    )
+                    if largest_gap > max_conv:
+                        max_conv = largest_gap
+            nb_iter += 1
+
+        print(f"    The calibration procedure converged after {nb_iter} iterations") \
+            if verbose else None
+        print(f"    max_conv = {max_conv}") if verbose else None
 
         # Compute final calibration ratios
         X_cal = X_cal.with_columns(
@@ -937,11 +1024,30 @@ but the name of the floor area variable is missing")
             model=calibration_model
         )
 
+        # Partial fitting of the pipeline
+        # Refactor that part as soon as https://github.com/microsoft/LightGBM/pull/6857
+        # is merged
+        self.calibration_model[:-1].fit(
+            X_cal.select(calibration_variables + ["predicted_price"]),
+            X_cal["calibration_ratio_final"].to_numpy()
+        )
+        eval_set = (
+                self.calibration_model[:-1].transform(X_cal),
+                X_cal["calibration_ratio_final"].to_numpy()
+        )
+
         # Train the model
         # This model is intentionally overfit
         self.calibration_model.fit(
             X_cal.select(calibration_variables + ["predicted_price"]),
-            X_cal["calibration_ratio_final"].to_numpy()
+            X_cal["calibration_ratio_final"].to_numpy(),
+            model__callbacks=[
+                stop_on_train_r2(r2_threshold)
+            ],
+            model__eval_metric=r2_eval,
+            model__eval_set=eval_set,
+            model__eval_names=["Train"],
+
         )
         # Predict calibration ratios on the calibration set
         predicted_ratios = self.calibration_model.predict(X_cal)
