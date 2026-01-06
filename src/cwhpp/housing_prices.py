@@ -27,6 +27,8 @@ import copy
 import numpy as np
 import polars as pl
 from polars import col as c
+from sklearn.base import BaseEstimator
+from sklearn.pipeline import Pipeline
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import r2_score
 from sklearn import metrics
