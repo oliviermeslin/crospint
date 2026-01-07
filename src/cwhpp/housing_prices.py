@@ -163,6 +163,210 @@ def r2_eval(preds, dataset):
     return "r2", r2_score(y_true, preds), True
 
 
+def calibrate_model(
+    model,
+    X: pl.DataFrame = None,
+    y=None,
+    calibration_variables: list = None,
+    perform_distributional_calibration: bool = True,
+    convergence_rate: float = 1e-3,
+    bounds: tuple = (0.5, 1.5),
+    max_iter: int = 100,
+    verbose: bool = True
+):
+    assert model.__class__.__name__ == "TwoStepsModel", "the model must be a TwoStepsModel"
+    assert model.is_model_fitted, "The model must be trained before being calibrated"
+
+    if (X is None or y is None):
+        if model.X_val is not None and model.y_val is not None:
+            print("    Using the validation dataset as calibration set.") if verbose else None
+            X = copy.deepcopy(model.X_val)
+            y = copy.deepcopy(model.y_val)
+    else:
+        raise ValueError("    Calibration data is missing.")
+
+    model.assert_is_1d_array(y)
+    assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
+    assert X.shape[0] == len(y), "y and X must have the same length"
+    assert isinstance(calibration_variables, list) or calibration_variables is None, \
+        "calibration_variables must be a list"
+    assert calibration_variables is not None or perform_distributional_calibration, \
+        "calibration_variables cannot be None if there is no distributional calibration"
+
+    # Check that X contains all necessary data
+    missing_vars = []
+    for var in calibration_variables + model.model_features:
+        if var not in X.columns:
+            missing_vars.extend(var)
+            print(f"Variable {var} is missing in the calibration set.")
+    if len(missing_vars) > 0:
+        raise ValueError("Some variables are missing in the calibration set.")
+
+    assert len(bounds) == 2, 'Bounds must be a tuple of length 2'
+
+    # Step 1: Predicting prices on the calibration set
+    print("    Predicting prices on the calibration set") if verbose else None
+    raw_predictions = model.predict(
+        X,
+        add_retransformation_correction=False,
+        retransformation_method=None,
+        verbose=False
+    )
+    # Add the prediction to the calibration set
+    X_cal = X.with_columns(
+        predicted_price=pl.Series(raw_predictions),
+        target=pl.Series(y)
+    )
+
+    # Step 2: Performing the calibration
+    print("    Performing the calibration") if verbose else None
+
+    # Initialize the calibrated price
+    X_cal = X_cal.with_columns(
+        predicted_price_cal=c.predicted_price,
+        calibration_ratio=pl.lit(1)
+    )
+
+    if calibration_variables is None:
+        print("    There are no calibration variables. \
+Only distributional calibration will be performed.") if verbose else None
+
+    if perform_distributional_calibration is False:
+        print("    There is no distributional calibration. \
+Only marginal calibration will be performed.") if verbose else None
+
+    # Perform the iterative calibration
+    nb_iter = 0
+    max_conv = 10 * convergence_rate
+    while max_conv > convergence_rate:
+        if nb_iter >= max_iter:
+            raise RuntimeError(f"    Algorithm failed to converge after {max_iter} iterations. \
+You may try again with looser bounds, higher convergence thresholds or less calibration variables.")
+
+        X_cal = compute_calibration_ratios(
+            X=X_cal,
+            calibration_variables=calibration_variables,
+            perform_distributional_calibration=perform_distributional_calibration,
+            raw_prediction_variable="predicted_price",
+            cal_prediction_variable="predicted_price_cal",
+            target_variable="target",
+            bounds=bounds
+        )
+
+        # Check if convergence has been reached
+        if calibration_variables is not None:
+
+            max_conv = 0
+            for var in calibration_variables:
+                largest_gap = (
+                    X_cal
+                    .group_by(var)
+                    .agg(
+                        nb=pl.len(),
+                        ratio=(c.predicted_price_cal.sum()/c.target.sum()-1).abs()
+                    )
+                    # Remove very small categories
+                    .filter(c.nb/c.nb.sum() > 0.01)
+                    .select(c.ratio.max())
+                    .item()
+                )
+                if largest_gap > max_conv:
+                    max_conv = largest_gap
+        nb_iter += 1
+
+    print(f"    The calibration procedure converged after {nb_iter} iterations") \
+        if verbose else None
+    print(f"    max_conv = {max_conv}") if verbose else None
+
+    # Compute final calibration ratios
+    X_cal = X_cal.with_columns(
+        calibration_ratio_final=c.predicted_price_cal/c.predicted_price
+    )
+
+    model.calibration_variables = calibration_variables
+    if perform_distributional_calibration:
+        model.calibration_features = calibration_variables + ["predicted_price"]
+    else:
+        model.calibration_features = calibration_variables
+
+    model.X_cal = (
+        X_cal
+        .select(
+            model.calibration_features + 
+            ["target", "predicted_price_cal", "calibration_ratio_final"]
+        )
+    )
+
+def train_calibration_model(
+    model,
+    calibration_model=lightgbm.LGBMRegressor(
+        n_estimators=100,
+        num_leaves=1023,
+        max_depth=12,
+        learning_rate=0.5,
+        min_child_samples=20,
+        max_bins=10000,
+        random_state=123456,
+        verbose=-1
+    ),
+    r2_threshold=0.95,
+    evaluation_period=5,
+    verbose=True
+):
+
+    assert model.X_cal is not None, "Calibration has not been perform"
+
+    # Step 3: Train the calibration model
+    print("    Training the calibration model") if verbose else None
+    model.calibration_model = create_calibration_pipeline(
+        model=calibration_model
+    )
+
+    # Get settings of calibration to train the calibration model
+    calibration_features = model.calibration_features
+    X_cal = model.X_cal
+
+    # Partial fitting of the pipeline
+    # Refactor that part as soon as https://github.com/microsoft/LightGBM/pull/6857
+    # is merged
+    model.calibration_model[:-1].fit(
+        X_cal.select(calibration_features),
+        X_cal["calibration_ratio_final"].to_numpy()
+    )
+    eval_set = (
+            model.calibration_model[:-1].transform(X_cal),
+            X_cal["calibration_ratio_final"].to_numpy()
+    )
+
+    # Train the calibration model
+    # This model is intentionally overfit
+    model.calibration_model.fit(
+        X_cal.select(calibration_features),
+        X_cal["calibration_ratio_final"].to_numpy(),
+        model__callbacks=[
+            stop_on_train_r2(r2_threshold),
+            lightgbm.log_evaluation(period=evaluation_period)
+        ],
+        model__eval_metric=r2_eval,
+        model__eval_set=eval_set,
+        model__eval_names=["Train"]
+    )
+    # Predict calibration ratios on the calibration set
+    predicted_ratios = model.calibration_model.predict(X_cal)
+
+    # Add predicted calibration ratios in the calibration set
+    model.X_cal = (
+        X_cal
+        .with_columns(
+            calibration_ratio_final_pred=pl.Series(predicted_ratios)
+        )
+        .with_columns(
+            predicted_price_cal_pred=c.predicted_price*c.calibration_ratio_final_pred
+        )
+    )
+    model.is_calibrated = True
+
+
 class TwoStepsModel(BaseEstimator):
     """
     A custom estimator that combines two steps: transformation of the target
@@ -191,6 +395,7 @@ but the name of the floor area variable is missing")
         self.floor_area_name = floor_area_name
         self.X_val = None
         self.y_val = None
+        self.X_cal = None
 
         print("    Initiating an unfitted price prediction pipeline.")
         self.pipe = create_model_pipeline(
@@ -377,194 +582,6 @@ but the name of the floor area variable is missing")
         if obj is not None:
             assert isinstance(obj, np.ndarray), "Object is not a numpy array"
             assert obj.ndim == 1, "Array is not 1-dimensional"
-
-    def calibrate_model(
-        self,
-        X: pl.DataFrame = None,
-        y=None,
-        calibration_variables: list = None,
-        perform_distributional_calibration: bool = True,
-        convergence_rate: float = 1e-3,
-        bounds: tuple = (0.5, 1.5),
-        max_iter: int = 100,
-        calibration_model=lightgbm.LGBMRegressor(
-            n_estimators=100,
-            num_leaves=1023,
-            max_depth=12,
-            learning_rate=0.5,
-            min_child_samples=20,
-            max_bins=10000,
-            random_state=123456,
-            verbose=-1
-        ),
-        r2_threshold=1.0,
-        verbose: bool = True
-    ):
-
-        assert self.is_model_fitted, "The model must be trained before being calibrated"
-
-        if (X is None or y is None):
-            if self.X_val is not None and self.y_val is not None:
-                print("    Using the validation dataset as calibration set.") if verbose else None
-                X = copy.deepcopy(self.X_val)
-                y = copy.deepcopy(self.y_val)
-        else:
-            raise ValueError("    Calibration data is missing.")
-
-        self.assert_is_1d_array(y)
-        assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
-        assert X.shape[0] == len(y), "y and X must have the same length"
-        assert isinstance(calibration_variables, list) or calibration_variables is None, \
-            "calibration_variables must be a list"
-        assert calibration_variables is not None or perform_distributional_calibration, \
-            "calibration_variables cannot be None if there is no distributional calibration"
-
-        # Check that X contains all necessary data
-        missing_vars = []
-        for var in calibration_variables + self.model_features:
-            if var not in X.columns:
-                missing_vars.extend(var)
-                print(f"Variable {var} is missing in the calibration set.")
-        if len(missing_vars) > 0:
-            raise ValueError("Some variables are missing in the calibration set.")
-
-        assert len(bounds) == 2, 'Bounds must be a tuple of length 2'
-
-        # Step 1: Predicting prices on the calibration set
-        print("    Predicting prices on the calibration set") if verbose else None
-        raw_predictions = self.predict(
-            X,
-            add_retransformation_correction=False,
-            retransformation_method=None,
-            verbose=False
-        )
-        # Add the prediction to the calibration set
-        X_cal = X.with_columns(
-            predicted_price=pl.Series(raw_predictions),
-            target=pl.Series(y)
-        ).with_columns(
-            predicted_price_sqm=c.predicted_price/pl.col(self.floor_area_name)
-        )
-
-        # Step 2: Performing the calibration
-        print("    Performing the calibration") if verbose else None
-
-        # Initialize the calibrated price
-        X_cal = X_cal.with_columns(
-            predicted_price_cal=c.predicted_price,
-            calibration_ratio=pl.lit(1)
-        )
-
-        if calibration_variables is None:
-            print("    There are no calibration variables. \
-Only distributional calibration will be performed.") if verbose else None
-
-        if perform_distributional_calibration is False:
-            print("    There is no distributional calibration. \
-Only marginal calibration will be performed.") if verbose else None
-
-        # Perform the iterative calibration
-        nb_iter = 0
-        max_conv = 10 * convergence_rate
-        while max_conv > convergence_rate:
-            if nb_iter >= max_iter:
-                raise RuntimeError(f"    Algorithm failed to converge after {max_iter} iterations. \
-You may try again with looser bounds, higher convergence thresholds or less calibration variables.")
-
-            X_cal = compute_calibration_ratios(
-                X=X_cal,
-                calibration_variables=calibration_variables,
-                perform_distributional_calibration=perform_distributional_calibration,
-                raw_prediction_variable="predicted_price",
-                cal_prediction_variable="predicted_price_cal",
-                target_variable="target",
-                bounds=bounds
-            )
-
-            # Check if convergence has been reached
-            if calibration_variables is not None:
-
-                max_conv = 0
-                for var in calibration_variables:
-                    largest_gap = (
-                        X_cal
-                        .group_by(var)
-                        .agg(
-                            nb=pl.len(),
-                            ratio=(c.predicted_price_cal.sum()/c.target.sum()-1).abs()
-                        )
-                        # Remove very small categories
-                        .filter(c.nb/c.nb.sum() > 0.01)
-                        .select(c.ratio.max())
-                        .item()
-                    )
-                    if largest_gap > max_conv:
-                        max_conv = largest_gap
-            nb_iter += 1
-
-        print(f"    The calibration procedure converged after {nb_iter} iterations") \
-            if verbose else None
-        print(f"    max_conv = {max_conv}") if verbose else None
-
-        # Compute final calibration ratios
-        X_cal = X_cal.with_columns(
-            calibration_ratio_final=c.predicted_price_cal/c.predicted_price
-        )
-
-        # Step 3: Train the calibration model
-        print("    Training the calibration model") if verbose else None
-        self.calibration_model = create_calibration_pipeline(
-            model=calibration_model
-        )
-
-        # Partial fitting of the pipeline
-        # Refactor that part as soon as https://github.com/microsoft/LightGBM/pull/6857
-        # is merged
-        self.calibration_model[:-1].fit(
-            X_cal.select(calibration_variables + ["predicted_price"]),
-            X_cal["calibration_ratio_final"].to_numpy()
-        )
-        eval_set = (
-                self.calibration_model[:-1].transform(X_cal),
-                X_cal["calibration_ratio_final"].to_numpy()
-        )
-
-        # Train the model
-        # This model is intentionally overfit
-        self.calibration_model.fit(
-            X_cal.select(calibration_variables + ["predicted_price"]),
-            X_cal["calibration_ratio_final"].to_numpy(),
-            model__callbacks=[
-                stop_on_train_r2(r2_threshold)
-            ],
-            model__eval_metric=r2_eval,
-            model__eval_set=eval_set,
-            model__eval_names=["Train"],
-
-        )
-        # Predict calibration ratios on the calibration set
-        predicted_ratios = self.calibration_model.predict(X_cal)
-
-        # Add predicted calibration ratios in the calibration set
-        self.calibration_variables = calibration_variables
-        self.X_cal = (
-            X_cal
-            .select(
-                calibration_variables + [
-                    "target",
-                    "predicted_price",
-                    "calibration_ratio_final",
-                    "predicted_price_cal"
-                ]
-            )
-            .with_columns(
-                calibration_ratio_final_pred=pl.Series(predicted_ratios)
-            )
-            .with_columns(
-                predicted_price_cal_pred=c.predicted_price*c.calibration_ratio_final_pred
-            )
-        )
-        self.is_calibrated = True
 
     def calibrate_prediction(
         self,
