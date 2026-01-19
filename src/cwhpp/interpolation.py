@@ -284,10 +284,10 @@ def is_valid_ymd(date_str: [str, list]):
 # A custom transformer to convert a date variable to a numerical variable
 class ConvertDateToInteger(BaseEstimator, TransformerMixin):
     """
-    A custom transformer to convert transaction dates to integers (days since a reference date).
+    A custom transformer to convert dates to integers (days since a reference date).
 
     Parameters:
-    date (str): Name of the column with transaction dates.
+    date (str): Name of the column with dates.
     reference_date (str): Reference date in YYYY-MM-DD format. Defaults to "2010-01-01".
     """
     def __init__(self, date_name: str = None, reference_date: str = "2010-01-01"):
@@ -305,7 +305,7 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         Set parameters for the transformer.
 
         Parameters:
-        date_name (str): Name of the column with transaction dates.
+        date_name (str): Name of the column with dates.
         reference_date (str): Reference date in YYYY-MM-DD format.
 
         Returns:
@@ -322,7 +322,7 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
 
     def fit(self, X: pl.DataFrame, y=None):
         """
-        Fit the transformer by validating the transaction date column.
+        Fit the transformer by validating the date column.
 
         Parameters:
         X (pl.DataFrame): Input data.
@@ -333,11 +333,11 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         """
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
 
-        # Raise an error if the transaction date is not in the data
+        # Raise an error if the date is not in the data
         if self.date_name not in X.columns:
             raise ValueError(f"Feature {self.date_name} is not in the data")
 
-        # Raise an error if the transaction date is not a date
+        # Raise an error if the date is not a date
         if not isinstance(X[self.date_name].dtype, pl.Date):
             raise TypeError(f"Feature {self.date_name} is not of type date")
 
@@ -346,7 +346,7 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
 
     def transform(self, X: pl.DataFrame, y=None):
         """
-        Convert the transaction date to an integer representing the number of days
+        Convert the date to an integer representing the number of days elapsed
         since the reference date.
 
         Parameters:
@@ -358,11 +358,11 @@ class ConvertDateToInteger(BaseEstimator, TransformerMixin):
         """
         assert isinstance(X, pl.DataFrame), "X must be a Polars DataFrame"
 
-        # Raise an error if the transaction date is not in the data
+        # Raise an error if the date is not in the data
         if self.date_name not in X.columns:
             raise ValueError(f"Feature {self.date_name} is not in the data")
 
-        # Raise an error if the transaction date is not a date
+        # Raise an error if the date is not a date
         if not isinstance(X[self.date_name].dtype, pl.Date):
             raise TypeError(f"Feature {self.date_name} is not of type date")
 

@@ -28,6 +28,7 @@ import numpy as np
 import polars as pl
 from polars import col as c
 from sklearn.base import BaseEstimator
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import r2_score
@@ -312,8 +313,10 @@ def train_calibration_model(
         random_state=123456,
         verbose=-1
     ),
-    r2_threshold=0.95,
+    validation_share=0,
     evaluation_period=5,
+    r2_threshold=1,
+    early_stopping_rounds=10,
     verbose=True
 ):
 
@@ -329,30 +332,61 @@ def train_calibration_model(
     calibration_features = model.calibration_features
     X_cal = model.X_cal
 
+    # Perform the train-test split
+    if validation_share > 0:
+        print("    Perform the train-test split")
+        X_train, X_test = train_test_split(
+            X_cal,
+            test_size=validation_share,
+            random_state=20230516
+        )
+    else:
+        X_train = X_cal
+        X_test = None
+
     # Partial fitting of the pipeline
     # Refactor that part as soon as https://github.com/microsoft/LightGBM/pull/6857
     # is merged
     model.calibration_model[:-1].fit(
-        X_cal.select(calibration_features),
-        X_cal["calibration_ratio_final"].to_numpy()
+        X_train.select(calibration_features),
+        X_train["calibration_ratio_final"].to_numpy()
     )
-    eval_set = (
-            model.calibration_model[:-1].transform(X_cal),
-            X_cal["calibration_ratio_final"].to_numpy()
-    )
+
+    if X_test is not None:
+        eval_set = [
+            (
+                model.calibration_model[:-1].transform(X_train),
+                X_train["calibration_ratio_final"].to_numpy()
+            ),
+            (
+                model.calibration_model[:-1].transform(X_test),
+                X_test["calibration_ratio_final"].to_numpy()
+            )
+        ]
+        eval_names = ["Train", "Test"]
+
+    else:
+        eval_set = [
+            (
+                model.calibration_model[:-1].transform(X_train),
+                X_train["calibration_ratio_final"].to_numpy()
+            )
+        ]
+        eval_names = ["Train"]
 
     # Train the calibration model
     # This model is intentionally overfit
     model.calibration_model.fit(
-        X_cal.select(calibration_features),
-        X_cal["calibration_ratio_final"].to_numpy(),
+        X_train.select(calibration_features),
+        X_train["calibration_ratio_final"].to_numpy(),
         model__callbacks=[
+            lightgbm.log_evaluation(period=evaluation_period),
             stop_on_train_r2(r2_threshold),
-            lightgbm.log_evaluation(period=evaluation_period)
+            lightgbm.early_stopping(stopping_rounds=early_stopping_rounds)
         ],
         model__eval_metric=r2_eval,
         model__eval_set=eval_set,
-        model__eval_names=["Train"]
+        model__eval_names=eval_names
     )
     # Predict calibration ratios on the calibration set
     predicted_ratios = model.calibration_model.predict(X_cal)
