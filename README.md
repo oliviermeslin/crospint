@@ -1,11 +1,6 @@
-# Country wide Housing Price Prediction
+#  `crospint`: Coordinate Rotation for Spatial Interpolation
 
-Provides a toolkit to train a model for estimating housing price.
-
-**Features**:
-- Shiny
-- Efficient
-- New
+This package provides a few functions and classes for efficient spatial interpolation using coordinate rotation and ensemble methods. It also provides the algorithms used in Meslin [2026].
 
 ## Test
 
@@ -22,5 +17,5 @@ uv publish --publish-url https://nexus.insee.fr/repository/pypi-internal/
 
 
 ```
-Pour réinstaller en écrasant, `uv sync --upgrade-package cwhpp==0.2.6.dev0`
+Pour réinstaller en écrasant, `uv sync --upgrade-package crospint==0.1.2`
 
