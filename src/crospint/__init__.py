@@ -1,4 +1,4 @@
-# Allow Importing directly from cwhpp
+# Allow Importing directly from crospint
 
 from .interpolation import ValidateFeatures as ValidateFeatures
 from .interpolation import AddCoordinatesRotation as AddCoordinatesRotation
