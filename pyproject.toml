@@ -9,10 +9,10 @@ authors = [
 ]
 dependencies = [
     "lightgbm>=4.6.0",
-    "matplotlib>=3.10.8",
+    "matplotlib>=3.10.1",
     "pandas>=2.3.0",
-    "polars>=1.33.1",
-    "pyarrow>=23.0.1",
+    "polars>=1.32.0",
+    "pyarrow>=23.0.0",
     "scikit-learn==1.7.2",
 ]
 
