@@ -9,3 +9,11 @@ This package provides a few functions and classes for efficient spatial interpol
 ## Basic use
 
 To be completed
+
+# Notebooks
+
+- How to use the conditional tail removal procedure [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)]
+(https://colab.research.google.com/github/oliviermeslin/cropsint/blob/main/notebooks/outlier_removal_through_CTR.ipynb)
+
+- How to train price models at the national scale [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)]
+(https://colab.research.google.com/github/oliviermeslin/cropsint/blob/main/notebooks/model_training_and_evaluation.ipynb)
