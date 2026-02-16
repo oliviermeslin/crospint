@@ -87,7 +87,7 @@ wheels = [
 
 [[package]]
 name = "crospint"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "." }
 dependencies = [
     { name = "lightgbm" },
@@ -107,7 +107,7 @@ dev = [
 requires-dist = [
     { name = "lightgbm", specifier = ">=4.6.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "pandas", specifier = ">=3.0.0" },
+    { name = "pandas", specifier = ">=2.3.0" },
     { name = "polars", specifier = ">=1.33.1" },
     { name = "pyarrow", specifier = ">=23.0.1" },
     { name = "scikit-learn", specifier = "==1.7.2" },
