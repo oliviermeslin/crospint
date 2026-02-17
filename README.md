@@ -75,6 +75,16 @@ predictions = pipe.predict(df[features])
 
 - **[User guide](doc/guide.md)** -- detailed walkthrough of all features: pipeline configuration, housing price modeling, calibration, outlier detection, and API reference.
 
+
+# Notebooks
+
+Two notebooks illustrate the valuation method describe in Meslin [2026]:
+
+- How to apply the conditional tail removal procedure [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/oliviermeslin/crospint/blob/improve_readme/notebooks/outlier_removal_through_CTR.ipynb)
+
+- How to train price models at the national scale [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/oliviermeslin/crospint/blob/improve_readme/notebooks/model_training_and_evaluation.ipynb)
+
+
 ## License
 
 MIT -- see [LICENSE](LICENSE) for details.
