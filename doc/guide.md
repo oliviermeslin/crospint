@@ -19,7 +19,7 @@ Tree-based models (LightGBM, Random Forest, XGBoost) partition the feature space
 
 ### Coordinate rotation as a solution
 
-`crospint` augments the feature set with **rotated copies** of the geographic coordinates. For example, with `number_axis=11`, the original (x, y) pair is rotated by 1/11th of a turn around the data centroid, then 2/11th of a turn, and so on up to 10/11th of a turn, adding 10 additional (x, y) pairs to the data. The final data contains 22 geographical features: the original (x, y) coordinates, and 10 rotated pairs of coordinates. This gives the tree model access to axis-aligned splits in multiple directions, improving spatial interpolation performance.
+`crospint` augments the feature set with **rotated copies** of the geographic coordinates. For example, with `number_axis=11`, the original (x, y) pair is rotated by 1/11th of a turn around the data centroid, then by 2/11th of a turn, and so on up to 10/11th of a turn, adding 10 additional (x, y) pairs to the data. The final data contains 22 geographical features: the original (x, y) coordinates, and 10 rotated pairs of coordinates. This gives the tree model access to axis-aligned splits in multiple directions, improving spatial interpolation performance.
 
 ### Pipeline architecture
 
