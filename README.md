@@ -6,9 +6,11 @@ A scikit-learn-compatible pipeline for spatial and spatio-temporal interpolation
 
 Tree-based models (LightGBM, Random Forest) split data along axis-aligned boundaries, which limits their ability to capture spatial patterns that don't align with the coordinate axes. `crospint` solves this by augmenting the feature set with rotated copies of the geographic coordinates, allowing the model to perform oblique spatial splits.
 
-The package offers full compatibility with `scikit-learn`. It accepts [Polars](https://pola.rs/) DataFrames as input, while maintaining full compatibility with ML libraries that requires [Pandas](https://pandas.pydata.org/) DataFrames as input. It also provides `TwoStepsModel`, a housing price estimator that handles log-transformation, price-per-square-meter conversion, retransformation bias correction, and iterative calibration.
+The package offers full compatibility with `scikit-learn`. It accepts [Polars](https://pola.rs/) DataFrames as input, while maintaining full compatibility with ML libraries that require [Pandas](https://pandas.pydata.org/) DataFrames as input. It also provides `TwoStepsModel`, a housing price estimator that handles log-transformation, price-per-square-meter conversion, retransformation bias correction, and iterative calibration.
 
 ## Installation
+
+Install with `pip`:
 
 ```bash
 pip install crospint
@@ -58,7 +60,7 @@ df = pl.DataFrame({
 pipe = create_model_pipeline(model=LGBMRegressor(n_estimators=100, verbose=-1))
 pipe.set_params(
     coord_rotation__coordinates_names=("x", "y"),
-    coord_rotation__number_axis=8,
+    coord_rotation__number_axis=11,
     date_conversion__date_name="transaction_date",
 )
 
