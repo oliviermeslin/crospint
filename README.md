@@ -4,9 +4,9 @@ A scikit-learn-compatible pipeline for spatial and spatio-temporal interpolation
 
 ## Overview
 
-Tree-based models (LightGBM, Random Forest) split data along axis-aligned boundaries, which limits their ability to capture spatial patterns that don't align with the coordinate axes. `crospint` solves this by augmenting the feature set with rotated copies of the geographic coordinates, allowing the model to learn spatial patterns in multiple directions.
+Tree-based models (LightGBM, Random Forest) split data along axis-aligned boundaries, which limits their ability to capture spatial patterns that don't align with the coordinate axes. `crospint` solves this by augmenting the feature set with rotated copies of the geographic coordinates, allowing the model to perform oblique spatial splits.
 
-The package builds on scikit-learn's `Pipeline` architecture and accepts [Polars](https://pola.rs/) DataFrames as input. It also provides `TwoStepsModel`, a housing price estimator that handles log-transformation, price-per-square-meter conversion, retransformation bias correction, and iterative calibration.
+The package offers full compatibility with `scikit-learn`. It accepts [Polars](https://pola.rs/) DataFrames as input, while maintaining full compatibility with ML libraries that requires [Pandas](https://pandas.pydata.org/) DataFrames as input. It also provides `TwoStepsModel`, a housing price estimator that handles log-transformation, price-per-square-meter conversion, retransformation bias correction, and iterative calibration.
 
 ## Installation
 
@@ -20,7 +20,7 @@ or with [uv](https://docs.astral.sh/uv/):
 uv add crospint
 ```
 
-**Dependencies:** polars, pandas, pyarrow, scikit-learn, lightgbm, matplotlib.
+**Dependencies:** `polars`, `pandas`, `pyarrow`, `scipy`, `scikit-learn`, `lightgbm`, `matplotlib`.
 
 ## Quick start
 
