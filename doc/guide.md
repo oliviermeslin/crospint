@@ -19,7 +19,7 @@ Tree-based models (LightGBM, Random Forest, XGBoost) partition the feature space
 
 ### Coordinate rotation as a solution
 
-`crospint` augments the feature set with **rotated copies** of the geographic coordinates. For example, with `number_axis=8`, the original (x, y) pair is rotated by 45, 90, 135, 180, 225, 270, and 315 degrees around the data centroid, producing 7 additional (x, y) pairs (16 features total). This gives the tree model access to axis-aligned splits in multiple directions, greatly improving spatial interpolation quality.
+`crospint` augments the feature set with **rotated copies** of the geographic coordinates. For example, with `number_axis=11`, the original (x, y) pair is rotated by 1/11th of a turn around the data centroid, then 2/11th of a turn, and so on up to 10/11th of a turn, adding 10 additional (x, y) pairs to the data. The final data contains 22 geographical features: the original (x, y) coordinates, and 10 rotated pairs of coordinates. This gives the tree model access to axis-aligned splits in multiple directions, improving spatial interpolation performance.
 
 ### Pipeline architecture
 
@@ -29,7 +29,7 @@ Tree-based models (LightGBM, Random Forest, XGBoost) partition the feature space
 ValidateFeatures -> AddCoordinatesRotation -> ConvertDateToInteger -> ConvertToPandas -> Model
 ```
 
-Each step is a scikit-learn transformer (or estimator for the final model). Steps can be configured via `set_params` using the standard `stepname__param` syntax, or disabled by setting `presence_coordinates=False` or `presence_date=False`.
+Each step is a scikit-learn transformer (or estimator for the final model). Steps can be configured via `set_params` using the standard `stepname__param` syntax, or disabled by setting `presence_coordinates=False` or `presence_date=False`. The most important transformers are `AddCoordinatesRotation` and `ConvertDateToInteger`. The `ValidateFeatures` transformer checks features' names and order. The `ConvertToPandas` transformer converts the data from Polars to Pandas, to ensure compatibility with ML libraries requiring Pandas DataFrames as input.
 
 ---
 
@@ -37,7 +37,7 @@ Each step is a scikit-learn transformer (or estimator for the final model). Step
 
 ### Synthetic dataset
 
-All examples in this guide use the following synthetic dataset. It simulates real-estate transactions with geographic coordinates, floor area, transaction date, distance to the seashore, and a transaction amount.
+All examples in this guide use the following synthetic dataset. It simulates real-estate transactions with geographic coordinates, floor area, transaction date, distance to the seashore, and a transaction amount. 
 
 ```python
 import numpy as np
@@ -134,7 +134,7 @@ pipe_simple.fit(df[["floor_area", "seashore_distance"]], target)
 
 `TwoStepsModel` wraps the pipeline and adds:
 
-- **Log-transformation** of the target (with retransformation bias correction).
+- **Log-transformation** of the target (taking log before training, exponentiating with retransformation bias correction after prediction).
 - **Price-per-square-meter** conversion (divides the target by floor area before fitting, multiplies back after prediction).
 - **Validation set** support with early stopping (LightGBM).
 - **Calibration** (see [section 4](#4-calibration)).
@@ -176,16 +176,16 @@ features = ["x", "y", "floor_area", "transaction_date", "seashore_distance"]
 target = df["transaction_amount"].to_numpy()
 
 df_train, df_test, y_train, y_test = train_test_split(
-    df, target, test_size=0.2, random_state=42
+    df, target, test_size=0.2, random_state=20140214
 )
 df_train, df_val, y_train, y_val = train_test_split(
-    df_train, y_train, test_size=0.25, random_state=42
+    df_train, y_train, test_size=0.25, random_state=20140214
 )
 ```
 
 ### Fitting with a validation set
 
-When a validation set is provided, LightGBM uses it for early stopping:
+When a validation set is provided, LightGBM uses it for early stopping. The number of rounds for early stopping can be set using `early_stopping_rounds`.
 
 ```python
 model.fit(
@@ -199,7 +199,7 @@ model.fit(
 
 ### Predicting with retransformation correction
 
-When the target is log-transformed, the naive back-transformation `exp(prediction)` is biased downward. `TwoStepsModel` supports two correction methods:
+When the target is log-transformed, the naive back-transformation `exp(prediction)` is biased downward. `TwoStepsModel` supports two correction methods (in addition to calibration):
 
 - **Miller (1984):** multiplies predictions by `exp(RMSE^2 / 2)`.
 - **Duan (1983):** multiplies predictions by the mean of `exp(residuals)` (smearing factor).
@@ -231,9 +231,9 @@ y_pred = model.predict(
 
 ### Why calibrate?
 
-Even with retransformation correction, predicted totals may not match observed totals across important subgroups (e.g. by region, property type). Calibration adjusts predictions so that they are consistent with known marginal totals.
+Even with retransformation correction, predicted totals may not match observed totals across important subgroups (e.g. by region, property type). Moreover, the price distribution predicted by the model may not reflect the true price distribution. Calibration adjusts predictions so that they are consistent with both known marginal totals and the observed price distribution.
 
-`crospint` provides two calibration steps:
+`crospint` combines two calibration steps:
 
 1. **Iterative raking** (`calibrate_model`): computes calibration ratios by iteratively adjusting predictions to match marginal totals of specified variables, optionally combined with distributional calibration via isotonic regression.
 2. **Calibration model** (`train_calibration_model`): trains a secondary model to predict the calibration ratios, so they can be applied to new data at prediction time.
@@ -269,7 +269,7 @@ model, converged = calibrate_model(
 | `y` | Calibration target (numpy array) | validation target if available |
 | `calibration_variables` | List of column names for marginal calibration | `None` |
 | `perform_distributional_calibration` | Use isotonic regression for distributional calibration | `True` |
-| `convergence_rate` | Stop when max relative gap is below this | `1e-3` |
+| `convergence_rate` | Stop when the largest relative gap is below this (in absolute value) | `1e-3` |
 | `bounds` | Clip calibration ratios to (lower, upper) | `(0.5, 1.5)` |
 | `max_iter` | Maximum number of iterations | `100` |
 
@@ -282,10 +282,10 @@ model = train_calibration_model(
     model,
     calibration_model=LGBMRegressor(
         n_estimators=100, num_leaves=1023, max_depth=12,
-        learning_rate=0.5, min_child_samples=20, max_bins=10000,
+        learning_rate=0.5, min_child_samples=20, max_bins=1000,
         random_state=123456, verbose=-1,
     ),
-    verbose=True,
+    verbose=True
 )
 ```
 
@@ -310,8 +310,6 @@ y_pred_calibrated = model.predict(
 ## 5. Outlier detection
 
 A common approach for outlier detection in spatial modeling is to compare observed values against out-of-bag (OOB) predictions from a Random Forest, then flag observations whose residuals are extreme.
-
-> **Note:** This section uses `scipy`, which is **not** a dependency of `crospint`. Install it separately if needed: `pip install scipy`.
 
 ### Fit a Random Forest with OOB predictions
 
