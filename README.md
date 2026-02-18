@@ -4,11 +4,13 @@ A scikit-learn-compatible pipeline for spatial and spatio-temporal interpolation
 
 ## Overview
 
-Tree-based models (LightGBM, Random Forest) split data along axis-aligned boundaries, which limits their ability to capture spatial patterns that don't align with the coordinate axes. `crospint` solves this by augmenting the feature set with rotated copies of the geographic coordinates, allowing the model to learn spatial patterns in multiple directions.
+Tree-based models (LightGBM, Random Forest) split data along axis-aligned boundaries, which limits their ability to capture spatial patterns that don't align with the coordinate axes. `crospint` solves this by augmenting the feature set with rotated copies of the geographic coordinates, allowing the model to perform oblique spatial splits.
 
-The package builds on scikit-learn's `Pipeline` architecture and accepts [Polars](https://pola.rs/) DataFrames as input. It also provides `TwoStepsModel`, a housing price estimator that handles log-transformation, price-per-square-meter conversion, retransformation bias correction, and iterative calibration.
+The package offers full compatibility with `scikit-learn`. It accepts [Polars](https://pola.rs/) DataFrames as input, while maintaining full compatibility with ML libraries that require [Pandas](https://pandas.pydata.org/) DataFrames as input. It also provides `TwoStepsModel`, a housing price estimator that handles log-transformation, price-per-square-meter conversion, retransformation bias correction, and iterative calibration.
 
 ## Installation
+
+Install with `pip`:
 
 ```bash
 pip install crospint
@@ -20,7 +22,7 @@ or with [uv](https://docs.astral.sh/uv/):
 uv add crospint
 ```
 
-**Dependencies:** polars, pandas, pyarrow, scikit-learn, lightgbm, matplotlib.
+**Dependencies:** `polars`, `pandas`, `pyarrow`, `scipy`, `scikit-learn`, `lightgbm`, `matplotlib`.
 
 ## Quick start
 
@@ -58,7 +60,7 @@ df = pl.DataFrame({
 pipe = create_model_pipeline(model=LGBMRegressor(n_estimators=100, verbose=-1))
 pipe.set_params(
     coord_rotation__coordinates_names=("x", "y"),
-    coord_rotation__number_axis=8,
+    coord_rotation__number_axis=11,
     date_conversion__date_name="transaction_date",
 )
 
@@ -72,6 +74,16 @@ predictions = pipe.predict(df[features])
 ## Documentation
 
 - **[User guide](doc/guide.md)** -- detailed walkthrough of all features: pipeline configuration, housing price modeling, calibration, outlier detection, and API reference.
+
+
+# Notebooks
+
+Two notebooks illustrate the valuation method describe in Meslin [2026]:
+
+- How to apply the conditional tail removal procedure [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/oliviermeslin/crospint/blob/improve_readme/notebooks/outlier_removal_through_CTR.ipynb)
+
+- How to train price models at the national scale [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/oliviermeslin/crospint/blob/improve_readme/notebooks/model_training_and_evaluation.ipynb)
+
 
 ## License
 
