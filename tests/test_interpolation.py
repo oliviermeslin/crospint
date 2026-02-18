@@ -54,6 +54,25 @@ class TestRotatePoint:
         np.testing.assert_allclose(xx, [0.0, -1.0], atol=1e-10)
         np.testing.assert_allclose(yy, [1.0, 0.0], atol=1e-10)
 
+    def test_rotate_point_1_5th(self, n):
+        xx, yy = rotate_point(11.0, -6.0, 360/5)
+        assert xx == pytest.approx(9.105526035895343, abs=1e-10)
+        assert yy == pytest.approx(8.607519712997004, abs=1e-10)
+
+    def test_rotate_point_1_7th(self, n):
+        xx, yy = rotate_point(11.0, -6.0, 360/7)
+        assert xx == pytest.approx(11.549376715254247, abs=1e-10)
+        assert yy == pytest.approx(4.859207495995927, abs=1e-10)
+
+    def test_rotate_point_1_11th(self, n):
+        xx, yy = rotate_point(11.0, -6.0, 360/11)
+        assert xx == pytest.approx(12.497633765876579, abs=1e-10)
+        assert yy == pytest.approx(0.8995277950244853, abs=1e-10)
+
+    def test_rotate_point_1_23th(self, n):
+        xx, yy = rotate_point(11.0, -6.0, 360/23)
+        assert xx == pytest.approx(12.210870787767938, abs=1e-10)
+        assert yy == pytest.approx(-2.8097392413595284, abs=1e-10)
 
 # ── ValidateFeatures ─────────────────────────────────────────────────────
 
