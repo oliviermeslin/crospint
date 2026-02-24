@@ -78,7 +78,7 @@ predictions = pipe.predict(df[features])
 
 # Notebooks
 
-Two notebooks illustrate the valuation method describe in Meslin [2026]:
+Two notebooks illustrate the valuation method described in Meslin [2026]:
 
 - How to apply the conditional tail removal procedure [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/oliviermeslin/crospint/blob/improve_readme/notebooks/outlier_removal_through_CTR.ipynb)
 
