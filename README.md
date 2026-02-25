@@ -19,7 +19,6 @@ If you use this package in research, I kindly request that you cite it.
   year    = {2025},
   publisher = {GitHub},
   url     = {https://github.com/oliviermeslin/crospint},
-  doi     = {10.5281/zenodo.xxxxx}
 }
 
 ## Installation
