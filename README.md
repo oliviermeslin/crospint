@@ -13,7 +13,7 @@ The package offers full compatibility with `scikit-learn`. It accepts [Polars](h
 If you use this package in research, I kindly request that you cite it.
 
 ```bibtex
-@software{Meslin2025,
+@misc{Meslin2025,
   author  = {Meslin, Olivier},
   title   = {crospint: a Python scikit-learn-compatible pipeline for spatial and spatio-temporal interpolation using coordinate rotation and ensemble methods},
   year    = {2025},
