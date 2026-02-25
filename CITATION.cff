@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+title: crospint
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Olivier
+    family-names: Meslin
+    email: olivier.meslin@insee.fr
+    affiliation: Insee and Paris School of Economics
+repository-code: 'https://github.com/oliviermeslin/crospint'
+abstract: >-
+  A scikit-learn-compatible pipeline for spatial and
+  spatio-temporal interpolation using coordinate rotation
+  and ensemble methods.
+license: MIT
