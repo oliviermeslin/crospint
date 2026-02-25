@@ -8,6 +8,20 @@ Tree-based models (LightGBM, Random Forest) split data along axis-aligned bounda
 
 The package offers full compatibility with `scikit-learn`. It accepts [Polars](https://pola.rs/) DataFrames as input, while maintaining full compatibility with ML libraries that require [Pandas](https://pandas.pydata.org/) DataFrames as input. It also provides `TwoStepsModel`, a housing price estimator that handles log-transformation, price-per-square-meter conversion, retransformation bias correction, and iterative calibration.
 
+## Citation
+
+If you use this package in research, I kindly request that you cite it.
+
+```bibtex
+@software{Meslin2025,
+  author  = {Meslin, Olivier},
+  title   = {crospint: a Python scikit-learn-compatible pipeline for spatial and spatio-temporal interpolation using coordinate rotation and ensemble methods},
+  year    = {2025},
+  publisher = {GitHub},
+  url     = {https://github.com/oliviermeslin/crospint},
+  doi     = {10.5281/zenodo.xxxxx}
+}
+
 ## Installation
 
 Install with `pip`:
